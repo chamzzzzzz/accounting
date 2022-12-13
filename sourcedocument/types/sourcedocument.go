@@ -7,6 +7,7 @@ type SourceDocument struct {
 	From        string
 	To          string
 	Amount      string
+	OrderNumber string
 	Merchant    string
 	Description string
 	Date        string
