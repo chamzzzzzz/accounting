@@ -1,26 +1,15 @@
-package wechatpay
+package analyzer
 
-import (
-	"github.com/chamzzzzzz/accounting/sourcedocument/analyzer/driver"
-	"github.com/chamzzzzzz/accounting/sourcedocument/types"
-)
-
-const (
-	DriverName = "wechatpay"
-	ParamName  = "v1"
-)
-
-type Analyzer struct {
+type WechatPay struct {
 }
 
-func (analyzer *Analyzer) Analyze(sourcefrom any) (*types.SourceDocument, error) {
-	source := sourcefrom.(*types.Source)
+func (w *WechatPay) Analyze(source *Source) (*SourceDocument, error) {
 	for _, keyword := range []string{"当前状态", "商户全称", "支付时间", "支付方式", "交易单号", "商户单号", "商品"} {
 		if len(source.TextEquals(keyword)) == 0 {
 			return nil, nil
 		}
 	}
-	sourcedocument := &types.SourceDocument{}
+	sourcedocument := &SourceDocument{}
 	sourcedocument.Source = source
 	sourcedocument.Name = "WechatPay"
 	sourcedocument.Class = "Expensive"
@@ -41,19 +30,4 @@ func (analyzer *Analyzer) Analyze(sourcefrom any) (*types.SourceDocument, error)
 		}
 	}
 	return sourcedocument, nil
-}
-
-func (analyzer *Analyzer) Driver() driver.Driver {
-	return &Driver{}
-}
-
-type Driver struct {
-}
-
-func (driver *Driver) Open(paramName string) (driver.Analyzer, error) {
-	return &Analyzer{}, nil
-}
-
-func init() {
-	driver.Register(DriverName, &Driver{})
 }

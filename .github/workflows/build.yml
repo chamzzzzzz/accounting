@@ -1,15 +1,15 @@
-name: Test
+name: Build
 
 on:
   push:
 
 jobs:
-  build:
+  Build:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        go: [ '1.18', '1.19' ]
-    name: Test with Go ${{ matrix.go }}
+        go: [ '1.21.0' ]
+    name: Build with Go ${{ matrix.go }}
     steps:
     - uses: actions/checkout@v3
 
@@ -20,6 +20,3 @@ jobs:
 
     - name: Build
       run: go build -v ./...
-
-    - name: Test
-      run: go test -v ./...

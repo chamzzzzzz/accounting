@@ -1,25 +1,16 @@
-package types
+package accounting
 
-import (
-	"strings"
-)
+import "strings"
 
 type SourceItem struct {
 	Index  int
+	Name   string
 	Text   string
 	X      int
 	Y      int
-	Width  int
-	Height int
+	W      int
+	H      int
 	Weight int
-}
-
-func (item *SourceItem) Point() (int, int) {
-	return item.X, item.Y
-}
-
-func (item *SourceItem) Size() (int, int) {
-	return item.Width, item.Height
 }
 
 type Source struct {
@@ -116,4 +107,17 @@ func (source *Source) ColonJoinedKeyValue(key string) (*SourceItem, string) {
 
 func (source *Source) ColonJoinedKeyValueText(key string) string {
 	return source.SeparatorJoinedKeyValueText(key, "：")
+}
+
+type SourceDocument struct {
+	Source      *Source
+	Name        string
+	Class       string
+	From        string
+	To          string
+	Amount      string
+	OrderNumber string
+	Merchant    string
+	Description string
+	Date        string
 }
