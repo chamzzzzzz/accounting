@@ -4,7 +4,7 @@ type UnionPay struct {
 }
 
 func (u *UnionPay) Analyze(source *Source) (*SourceDocument, error) {
-	for _, keyword := range []string{"还款详情", "订单类型", "还款卡号", "付款卡号", "订单编号", "创建时间"} {
+	for _, keyword := range []string{"还款详情", "订单类型", "信用卡还款", "还款卡号", "付款卡号", "订单编号", "创建时间"} {
 		if len(source.TextEquals(keyword)) == 0 {
 			return nil, nil
 		}

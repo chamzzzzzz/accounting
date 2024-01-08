@@ -110,14 +110,14 @@ func (source *Source) ColonJoinedKeyValueText(key string) string {
 }
 
 type SourceDocument struct {
-	Source      *Source
-	Name        string
-	Class       string
-	From        string
-	To          string
-	Amount      string
-	OrderNumber string
-	Merchant    string
-	Description string
-	Date        string
+	Source      *Source `json:"source"`
+	Name        string  `json:"name"`
+	Class       string  `json:"class"`
+	From        string  `json:"from"`
+	To          string  `json:"to"`
+	Amount      string  `json:"amount"`
+	OrderNumber string  `json:"orderNumber"`
+	Merchant    string  `json:"merchant"`
+	Description string  `json:"description"`
+	Date        string  `json:"date"`
 }
