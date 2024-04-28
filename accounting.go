@@ -7,11 +7,15 @@ type Account struct {
 	Description string `json:"description,omitempty"`
 }
 
-type Entry struct {
-	Account  string `json:"account,omitempty"`
-	Amount   string `json:"amount,omitempty"`
+type Amount struct {
+	Quantity string `json:"quantity,omitempty"`
 	Currency string `json:"currency,omitempty"`
-	Note     string `json:"note,omitempty"`
+}
+
+type Entry struct {
+	Account string  `json:"account,omitempty"`
+	Amount  *Amount `json:"amount,omitempty"`
+	Note    string  `json:"note,omitempty"`
 }
 
 type Voucher struct {
