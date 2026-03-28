@@ -1,11 +1,24 @@
 package book
 
 import (
+	"context"
+
 	"github.com/chamzzzzzz/accounting/account"
 	"github.com/chamzzzzzz/accounting/journal"
 )
 
+type Info struct {
+	Title string `json:"title,omitempty"`
+}
+
 type Book struct {
-	Coa      account.ChartOfAccounts `json:"coa,omitempty"`
-	Journals []*journal.Journal      `json:"journals,omitempty"`
+	Id       string             `json:"-"`
+	Info     *Info              `json:"info,omitempty"`
+	Accounts []*account.Account `json:"accounts,omitempty"`
+	Journals []*journal.Journal `json:"journals,omitempty"`
+}
+
+type Provider interface {
+	Load(ctx context.Context, id string) (*Book, error)
+	Save(ctx context.Context, book *Book) error
 }
