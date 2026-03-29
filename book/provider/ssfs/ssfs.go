@@ -147,6 +147,9 @@ func readJournals(path string) ([]*Journal, error) {
 
 func writeJournals(path string, journals []*Journal) error {
 	root := filepath.Join(path, "JOURNALS")
+	if err := os.RemoveAll(root); err != nil {
+		return err
+	}
 	if err := os.MkdirAll(root, 0755); err != nil {
 		return err
 	}
@@ -157,7 +160,7 @@ func writeJournals(path string, journals []*Journal) error {
 		if journal.Date == "" {
 			return errors.New("no journal date")
 		}
-		t, err := time.ParseInLocation(time.RFC3339, journal.Date, time.Local)
+		t, err := time.ParseInLocation("2006-01", journal.Date, time.Local)
 		if err != nil {
 			return errors.New("invalid journal date: " + journal.Date)
 		}

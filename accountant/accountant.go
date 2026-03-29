@@ -74,11 +74,7 @@ func (a *Accountant) DelJournal(date string, catalog string) error {
 		return ErrNoBook
 	}
 	for i, j := range a.Book.Journals {
-		t, err := time.ParseInLocation(time.RFC3339, j.Date, time.Local)
-		if err != nil {
-			return err
-		}
-		if t.Format("2006-01-02") == date && j.Catalog == catalog {
+		if j.Date == date && j.Catalog == catalog {
 			a.Book.Journals = append(a.Book.Journals[:i], a.Book.Journals[i+1:]...)
 			return nil
 		}
@@ -91,11 +87,7 @@ func (a *Accountant) GetJournal(date string, catalog string) (*Journal, error) {
 		return nil, ErrNoBook
 	}
 	for _, j := range a.Book.Journals {
-		t, err := time.ParseInLocation(time.RFC3339, j.Date, time.Local)
-		if err != nil {
-			return nil, err
-		}
-		if t.Format("2006-01-02") == date && j.Catalog == catalog {
+		if j.Date == date && j.Catalog == catalog {
 			return j, nil
 		}
 	}
@@ -106,13 +98,18 @@ func (a *Accountant) AddVoucher(voucher *Voucher) error {
 	if a.Book == nil {
 		return ErrNoBook
 	}
-	j, err := a.GetJournal(voucher.Date, voucher.Catalog)
+	t, err := time.ParseInLocation(time.RFC3339, voucher.Date, time.Local)
+	if err != nil {
+		return err
+	}
+	date := t.Format("2006-01")
+	j, err := a.GetJournal(date, voucher.Catalog)
 	if err != nil {
 		return err
 	}
 	if j == nil {
 		j = &Journal{
-			Date:    voucher.Date,
+			Date:    date,
 			Catalog: voucher.Catalog,
 		}
 		if err := a.AddJournal(j); err != nil {
