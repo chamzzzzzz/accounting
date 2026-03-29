@@ -151,8 +151,8 @@ func writeJournals(path string, journals []*Journal) error {
 		return err
 	}
 	for _, journal := range journals {
-		if journal.Name == "" {
-			return errors.New("no journal name")
+		if journal.Catalog == "" {
+			return errors.New("no journal catalog")
 		}
 		if journal.Date == "" {
 			return errors.New("no journal date")
@@ -163,7 +163,7 @@ func writeJournals(path string, journals []*Journal) error {
 		}
 		year := t.Format("2006")
 		month := t.Format("01")
-		name := filepath.Join(root, year, month, journal.Name)
+		name := filepath.Join(root, year, month, journal.Catalog)
 		if err := write(name, journal); err != nil {
 			return err
 		}
