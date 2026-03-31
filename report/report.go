@@ -6,7 +6,7 @@ import (
 )
 
 type ReportParameters struct {
-	Title string
+	Titles []string `json:"titles,omitempty"`
 }
 
 type AccountBalance struct {
@@ -16,7 +16,7 @@ type AccountBalance struct {
 }
 
 type AccountBalanceReport struct {
-	Balance *AccountBalance `json:"balance,omitempty"`
+	Balance []*AccountBalance `json:"balance,omitempty"`
 }
 
 type AccountRegister struct {

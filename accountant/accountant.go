@@ -2,9 +2,14 @@ package accountant
 
 import (
 	"errors"
+	"math"
+	"sort"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/chamzzzzzz/accounting/account"
+	"github.com/chamzzzzzz/accounting/amount"
 	"github.com/chamzzzzzz/accounting/book"
 	"github.com/chamzzzzzz/accounting/journal"
 	"github.com/chamzzzzzz/accounting/report"
@@ -17,19 +22,40 @@ type (
 	Account               = account.Account
 	Voucher               = voucher.Voucher
 	Journal               = journal.Journal
-	Parameters            = report.ReportParameters
+	ReportParameters      = report.ReportParameters
 	AccountBalanceReport  = report.AccountBalanceReport
 	AccountRegisterReport = report.AccountRegisterReport
 )
 
 var (
-	ErrNoBook = errors.New("no book")
+	ErrNoBook       = errors.New("no book")
+	ErrTrialBalance = errors.New("trial balance error")
 )
 
 type Accountant struct {
 	Scanners   []scanner.Scanner
 	Processors []processor.Processor
 	Book       *book.Book
+}
+
+func normalizeAccountTitle(title string) string {
+	parts := strings.Split(title, ":")
+	filtered := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if part == "" {
+			continue
+		}
+		filtered = append(filtered, part)
+	}
+	return strings.Join(filtered, ":")
+}
+
+func roundAmount(v float64) float64 {
+	return math.Round(v*100) / 100
+}
+
+func formatAmount(v float64) string {
+	return strconv.FormatFloat(roundAmount(v), 'f', 2, 64)
 }
 
 func (a *Accountant) AddAccount(account *Account) error {
@@ -98,10 +124,36 @@ func (a *Accountant) GetJournal(date string, catalog string) (*Journal, error) {
 	return nil, nil
 }
 
+func (a *Accountant) CheckTrialBalance(voucher *Voucher) error {
+	totals := make(map[string]float64)
+	for _, entry := range voucher.Entries {
+		if entry.Amount == nil {
+			continue
+		}
+		q, err := strconv.ParseFloat(entry.Amount.Quantity, 64)
+		if err != nil {
+			return err
+		}
+		totals[entry.Amount.Currency] = roundAmount(totals[entry.Amount.Currency] + q)
+	}
+
+	for _, total := range totals {
+		if math.Abs(total) > 0.001 {
+			return ErrTrialBalance
+		}
+	}
+	return nil
+}
+
 func (a *Accountant) AddVoucher(voucher *Voucher) error {
 	if a.Book == nil {
 		return ErrNoBook
 	}
+
+	if err := a.CheckTrialBalance(voucher); err != nil {
+		return err
+	}
+
 	t, err := time.ParseInLocation(time.RFC3339, voucher.Date, time.Local)
 	if err != nil {
 		return err
@@ -124,14 +176,212 @@ func (a *Accountant) AddVoucher(voucher *Voucher) error {
 	return nil
 }
 
-func (a *Accountant) ReportAccountBalance(parameters *Parameters) (*AccountBalanceReport, error) {
+func (a *Accountant) ReportAccountBalance(parameters *ReportParameters) (*AccountBalanceReport, error) {
 	if a.Book == nil {
 		return nil, ErrNoBook
 	}
-	return nil, nil
+
+	nodes := map[string]*report.AccountBalance{}
+	rootOrder := []string{}
+	childAttached := map[string]map[string]bool{}
+
+	ensureNode := func(path string) *report.AccountBalance {
+		if node, ok := nodes[path]; ok {
+			return node
+		}
+		node := &report.AccountBalance{Title: path}
+		nodes[path] = node
+		if !strings.Contains(path, ":") {
+			rootOrder = append(rootOrder, path)
+		}
+		return node
+	}
+
+	ensurePath := func(title string) {
+		normalized := normalizeAccountTitle(title)
+		if normalized == "" {
+			return
+		}
+		parts := strings.Split(normalized, ":")
+		for i := 0; i < len(parts); i++ {
+			current := strings.Join(parts[:i+1], ":")
+			ensureNode(current)
+			if i == 0 {
+				continue
+			}
+			parent := strings.Join(parts[:i], ":")
+			parentNode := ensureNode(parent)
+			if childAttached[parent] == nil {
+				childAttached[parent] = map[string]bool{}
+			}
+			if !childAttached[parent][current] {
+				parentNode.Children = append(parentNode.Children, ensureNode(current))
+				childAttached[parent][current] = true
+			}
+		}
+	}
+
+	directTotals := map[string]map[string]float64{}
+	addAmount := func(title, currency string, value float64) {
+		if directTotals[title] == nil {
+			directTotals[title] = map[string]float64{}
+		}
+		directTotals[title][currency] = roundAmount(directTotals[title][currency] + value)
+	}
+
+	for _, j := range a.Book.Journals {
+		if j == nil {
+			continue
+		}
+		for _, v := range j.Vouchers {
+			if v == nil {
+				continue
+			}
+			for _, e := range v.Entries {
+				if e == nil || e.Amount == nil {
+					continue
+				}
+				title := normalizeAccountTitle(e.Account)
+				if title == "" {
+					continue
+				}
+				ensurePath(title)
+				quantity, err := strconv.ParseFloat(e.Amount.Quantity, 64)
+				if err != nil {
+					continue
+				}
+				addAmount(title, e.Amount.Currency, quantity)
+			}
+		}
+	}
+
+	for _, node := range nodes {
+		sort.Slice(node.Children, func(i, j int) bool {
+			return node.Children[i].Title < node.Children[j].Title
+		})
+	}
+
+	buildAmounts := func(totals map[string]float64) []*amount.Amount {
+		if len(totals) == 0 {
+			return nil
+		}
+		currencies := make([]string, 0, len(totals))
+		for currency := range totals {
+			currencies = append(currencies, currency)
+		}
+		sort.Strings(currencies)
+		amounts := make([]*amount.Amount, 0, len(currencies))
+		for _, currency := range currencies {
+			amounts = append(amounts, &amount.Amount{
+				Quantity: formatAmount(totals[currency]),
+				Currency: currency,
+			})
+		}
+		return amounts
+	}
+
+	var aggregate func(path string) map[string]float64
+	aggregate = func(path string) map[string]float64 {
+		totals := map[string]float64{}
+		for currency, value := range directTotals[path] {
+			totals[currency] = roundAmount(totals[currency] + value)
+		}
+		node := nodes[path]
+		if node != nil {
+			for _, child := range node.Children {
+				childTotals := aggregate(child.Title)
+				for currency, value := range childTotals {
+					totals[currency] = roundAmount(totals[currency] + value)
+				}
+			}
+			node.Amounts = buildAmounts(totals)
+		}
+		return totals
+	}
+
+	for _, root := range rootOrder {
+		aggregate(root)
+	}
+
+	selectAll := parameters == nil || len(parameters.Titles) == 0
+	targetTitles := map[string]bool{}
+	if !selectAll {
+		for _, title := range parameters.Titles {
+			normalized := normalizeAccountTitle(title)
+			if normalized == "" {
+				selectAll = true
+				break
+			}
+			targetTitles[normalized] = true
+		}
+	}
+
+	balance := []*report.AccountBalance{}
+	for _, root := range rootOrder {
+		node := nodes[root]
+		if node == nil {
+			continue
+		}
+		if selectAll {
+			balance = append(balance, node)
+		} else {
+			var filterNode func(*report.AccountBalance) *report.AccountBalance
+			filterNode = func(n *report.AccountBalance) *report.AccountBalance {
+				if targetTitles[n.Title] {
+					return &report.AccountBalance{
+						Title:    n.Title,
+						Amounts:  n.Amounts,
+						Children: n.Children,
+					}
+				}
+
+				isPrefixOfTarget := false
+				for target := range targetTitles {
+					if strings.HasPrefix(target, n.Title+":") {
+						isPrefixOfTarget = true
+						break
+					}
+				}
+
+				if isPrefixOfTarget {
+					var newChildren []*report.AccountBalance
+					newTotals := make(map[string]float64)
+					for _, child := range n.Children {
+						if filteredChild := filterNode(child); filteredChild != nil {
+							newChildren = append(newChildren, filteredChild)
+							for _, a := range filteredChild.Amounts {
+								v, _ := strconv.ParseFloat(a.Quantity, 64)
+								newTotals[a.Currency] = roundAmount(newTotals[a.Currency] + v)
+							}
+						}
+					}
+					if len(newChildren) > 0 {
+						return &report.AccountBalance{
+							Title:    n.Title,
+							Amounts:  buildAmounts(newTotals),
+							Children: newChildren,
+						}
+					}
+				}
+
+				for target := range targetTitles {
+					if strings.HasPrefix(n.Title, target+":") {
+						return n
+					}
+				}
+
+				return nil
+			}
+			if filtered := filterNode(node); filtered != nil {
+				balance = append(balance, filtered)
+			}
+		}
+	}
+
+	return &report.AccountBalanceReport{Balance: balance}, nil
 }
 
-func (a *Accountant) ReportAccountRegister(parameters *Parameters) (*AccountRegisterReport, error) {
+func (a *Accountant) ReportAccountRegister(parameters *ReportParameters) (*AccountRegisterReport, error) {
 	if a.Book == nil {
 		return nil, ErrNoBook
 	}

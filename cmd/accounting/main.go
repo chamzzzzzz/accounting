@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -14,6 +16,7 @@ import (
 	"github.com/chamzzzzzz/accounting/book"
 	"github.com/chamzzzzzz/accounting/book/provider/ssfs"
 	"github.com/chamzzzzzz/accounting/journal"
+	"github.com/chamzzzzzz/accounting/report"
 	"github.com/chamzzzzzz/accounting/voucher"
 )
 
@@ -23,7 +26,7 @@ type CLI struct {
 	provider    book.Provider
 	cmd         string
 	subcmd      string
-	title       string
+	titles      []string
 	date        string
 	catalog     string
 	description string
@@ -83,6 +86,9 @@ func (c *CLI) Run() error {
 		case "voucher":
 			c.printVoucherHelp()
 			return nil
+		case "report":
+			c.printReportHelp()
+			return nil
 		default:
 			c.printHelp()
 			return nil
@@ -101,6 +107,8 @@ func (c *CLI) Run() error {
 		return c.runJournal()
 	case "voucher":
 		return c.runVoucher()
+	case "report":
+		return c.runReport()
 	default:
 		fmt.Fprintf(os.Stderr, "unknown command: %s\n", c.cmd)
 		c.printHelp()
@@ -157,6 +165,16 @@ func (c *CLI) runVoucher() error {
 	}
 }
 
+func (c *CLI) runReport() error {
+	switch c.subcmd {
+	case "balance":
+		return c.cmdReportBalance()
+	default:
+		c.printReportHelp()
+		return nil
+	}
+}
+
 func (c *CLI) loadBook() (*book.Book, error) {
 	bk, err := c.provider.Load(context.Background(), ".")
 	if err != nil {
@@ -166,6 +184,21 @@ func (c *CLI) loadBook() (*book.Book, error) {
 		return nil, fmt.Errorf("book not found: %s", c.dir)
 	}
 	return bk, nil
+}
+
+func (c *CLI) accounting(save bool, fn func(bk *book.Book, acc *accountant.Accountant) error) error {
+	bk, err := c.loadBook()
+	if err != nil {
+		return err
+	}
+	acc := &accountant.Accountant{Book: bk}
+	if err := fn(bk, acc); err != nil {
+		return err
+	}
+	if save {
+		return c.saveBook(bk)
+	}
+	return nil
 }
 
 func (c *CLI) saveBook(bk *book.Book) error {
@@ -183,7 +216,7 @@ func (c *CLI) parseFlags() {
 			}
 		case "--title", "-t":
 			if i+1 < len(c.args) && c.args[i+1][0] != '-' {
-				c.title = c.args[i+1]
+				c.titles = append(c.titles, c.args[i+1])
 				i++
 			}
 		case "--date", "-d":
@@ -224,6 +257,7 @@ Commands:
   account   Account management
   journal   Journal management
   voucher   Voucher management
+  report    Report management
 
 Options:
   --book, -b  Book directory (default: ".")
@@ -280,6 +314,17 @@ Options:
   --entry, -e        Entry: "account amount currency" (repeatable)`)
 }
 
+func (c *CLI) printReportHelp() {
+	fmt.Println(`Usage: accounting report <subcommand> [options]
+
+Subcommands:
+  balance   Show account balance report
+  help      Show this help
+
+Options:
+  --title, -t  Account title (repeatable)`)
+}
+
 func (c *CLI) cmdBookCreate() error {
 	os.MkdirAll(c.dir, 0755)
 	bk := &book.Book{
@@ -296,76 +341,76 @@ func (c *CLI) cmdBookCreate() error {
 }
 
 func (c *CLI) cmdAccountList() error {
-	bk, err := c.loadBook()
-	if err != nil {
-		return err
-	}
-	if len(bk.Accounts) == 0 {
-		fmt.Println("No accounts")
+	return c.accounting(false, func(bk *book.Book, acc *accountant.Accountant) error {
+		if len(bk.Accounts) == 0 {
+			fmt.Println("No accounts")
+			return nil
+		}
+		fmt.Println("Accounts:")
+		for _, a := range bk.Accounts {
+			fmt.Printf("  %s\n", a.Title)
+		}
 		return nil
-	}
-	fmt.Println("Accounts:")
-	for _, a := range bk.Accounts {
-		fmt.Printf("  %s\n", a.Title)
-	}
-	return nil
+	})
 }
 
 func (c *CLI) cmdAccountAdd() error {
-	bk, err := c.loadBook()
+	if len(c.titles) == 0 {
+		return fmt.Errorf("--title is required")
+	}
+	err := c.accounting(true, func(bk *book.Book, acc *accountant.Accountant) error {
+		for _, title := range c.titles {
+			if err := acc.AddAccount(&account.Account{Title: title}); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 	if err != nil {
 		return err
 	}
-	if c.title == "" {
-		return fmt.Errorf("--title is required")
+	for _, title := range c.titles {
+		fmt.Printf("Account added: %s\n", title)
 	}
-	acc := &accountant.Accountant{Book: bk}
-	acc.AddAccount(&account.Account{Title: c.title})
-	if err := c.saveBook(bk); err != nil {
-		return err
-	}
-	fmt.Printf("Account added: %s\n", c.title)
 	return nil
 }
 
 func (c *CLI) cmdAccountDelete() error {
-	bk, err := c.loadBook()
+	if len(c.titles) == 0 {
+		return fmt.Errorf("--title is required")
+	}
+	err := c.accounting(true, func(bk *book.Book, acc *accountant.Accountant) error {
+		for _, title := range c.titles {
+			if err := acc.DelAccount(title); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 	if err != nil {
 		return err
 	}
-	if c.title == "" {
-		return fmt.Errorf("--title is required")
+	for _, title := range c.titles {
+		fmt.Printf("Account deleted: %s\n", title)
 	}
-	acc := &accountant.Accountant{Book: bk}
-	acc.DelAccount(c.title)
-	if err := c.saveBook(bk); err != nil {
-		return err
-	}
-	fmt.Printf("Account deleted: %s\n", c.title)
 	return nil
 }
 
 func (c *CLI) cmdJournalList() error {
-	bk, err := c.loadBook()
-	if err != nil {
-		return err
-	}
-	if len(bk.Journals) == 0 {
-		fmt.Println("No journals")
+	return c.accounting(false, func(bk *book.Book, acc *accountant.Accountant) error {
+		if len(bk.Journals) == 0 {
+			fmt.Println("No journals")
+			return nil
+		}
+		fmt.Println("Journals:")
+		for _, j := range bk.Journals {
+			fmt.Printf("  %s  %s  (%d vouchers)\n", j.Date, j.Catalog, len(j.Vouchers))
+		}
 		return nil
-	}
-	fmt.Println("Journals:")
-	for _, j := range bk.Journals {
-		fmt.Printf("  %s  %s  (%d vouchers)\n", j.Date, j.Catalog, len(j.Vouchers))
-	}
-	return nil
+	})
 }
 
 func (c *CLI) cmdJournalAdd() error {
-	bk, err := c.loadBook()
-	if err != nil {
-		return err
-	}
 	if c.date == "" {
 		return fmt.Errorf("--date is required")
 	}
@@ -376,9 +421,10 @@ func (c *CLI) cmdJournalAdd() error {
 	if err != nil {
 		return err
 	}
-	acc := &accountant.Accountant{Book: bk}
-	acc.AddJournal(&journal.Journal{Date: date, Catalog: c.catalog})
-	if err := c.saveBook(bk); err != nil {
+	err = c.accounting(true, func(bk *book.Book, acc *accountant.Accountant) error {
+		return acc.AddJournal(&journal.Journal{Date: date, Catalog: c.catalog})
+	})
+	if err != nil {
 		return err
 	}
 	fmt.Printf("Journal added: %s %s\n", date, c.catalog)
@@ -386,10 +432,6 @@ func (c *CLI) cmdJournalAdd() error {
 }
 
 func (c *CLI) cmdJournalDelete() error {
-	bk, err := c.loadBook()
-	if err != nil {
-		return err
-	}
 	if c.date == "" {
 		return fmt.Errorf("--date is required")
 	}
@@ -400,9 +442,10 @@ func (c *CLI) cmdJournalDelete() error {
 	if err != nil {
 		return err
 	}
-	acc := &accountant.Accountant{Book: bk}
-	acc.DelJournal(date, c.catalog)
-	if err := c.saveBook(bk); err != nil {
+	err = c.accounting(true, func(bk *book.Book, acc *accountant.Accountant) error {
+		return acc.DelJournal(date, c.catalog)
+	})
+	if err != nil {
 		return err
 	}
 	fmt.Printf("Journal deleted: %s %s\n", date, c.catalog)
@@ -410,10 +453,6 @@ func (c *CLI) cmdJournalDelete() error {
 }
 
 func (c *CLI) cmdVoucherAdd() error {
-	bk, err := c.loadBook()
-	if err != nil {
-		return err
-	}
 	if c.date == "" {
 		return fmt.Errorf("--date is required")
 	}
@@ -431,18 +470,103 @@ func (c *CLI) cmdVoucherAdd() error {
 	if len(entries) == 0 {
 		return fmt.Errorf("at least one --entry is required")
 	}
-	acc := &accountant.Accountant{Book: bk}
-	acc.AddVoucher(&voucher.Voucher{
-		Date:        date,
-		Catalog:     c.catalog,
-		Entries:     entries,
-		Description: c.description,
+	err = c.accounting(true, func(bk *book.Book, acc *accountant.Accountant) error {
+		return acc.AddVoucher(&voucher.Voucher{
+			Date:        date,
+			Catalog:     c.catalog,
+			Entries:     entries,
+			Description: c.description,
+		})
 	})
-	if err := c.saveBook(bk); err != nil {
+	if err != nil {
 		return err
 	}
 	fmt.Printf("Voucher added: %s %s (%d entries)\n", date, c.catalog, len(entries))
 	return nil
+}
+
+const (
+	amountColWidth = 11
+	lineSeparator  = "--------------------"
+)
+
+func (c *CLI) cmdReportBalance() error {
+	titles := c.titles
+	titles = append(titles, c.args[2:]...)
+
+	return c.accounting(false, func(bk *book.Book, acc *accountant.Accountant) error {
+		r, err := acc.ReportAccountBalance(&report.ReportParameters{
+			Titles: titles,
+		})
+		if err != nil {
+			return err
+		}
+
+		c.printAccountBalanceReport(r)
+		return nil
+	})
+}
+
+func (c *CLI) printAccountBalanceReport(r *report.AccountBalanceReport) {
+	for _, b := range r.Balance {
+		c.printAccountBalance(b, 0)
+	}
+	c.printAccountBalanceReportTotal(r)
+}
+
+func (c *CLI) printAccountBalanceReportTotal(r *report.AccountBalanceReport) {
+	totals := make(map[string]float64)
+	for _, b := range r.Balance {
+		for _, a := range b.Amounts {
+			q, _ := strconv.ParseFloat(a.Quantity, 64)
+			totals[a.Currency] += q
+		}
+	}
+
+	var currencies []string
+	for cur := range totals {
+		currencies = append(currencies, cur)
+	}
+	sort.Strings(currencies)
+
+	if len(currencies) > 0 {
+		fmt.Printf("%s\n", lineSeparator)
+		for _, cur := range currencies {
+			fmt.Printf("%*s %s\n", amountColWidth, fmt.Sprintf("%.2f", totals[cur]), cur)
+		}
+	}
+}
+
+func (c *CLI) printAccountBalance(b *report.AccountBalance, indent int) {
+	node := b
+	title := b.Title
+	if indent > 0 {
+		parts := strings.Split(title, ":")
+		title = parts[len(parts)-1]
+	}
+
+	for len(node.Children) == 1 {
+		child := node.Children[0]
+		childParts := strings.Split(child.Title, ":")
+		title += ":" + childParts[len(childParts)-1]
+		node = child
+	}
+
+	indentStr := strings.Repeat("  ", indent)
+	if len(node.Amounts) == 0 {
+		fmt.Printf("%*s  %s%s\n", amountColWidth+1+3, "", indentStr, title)
+	} else {
+		for i, a := range node.Amounts {
+			if i == 0 {
+				fmt.Printf("%*s %s  %s%s\n", amountColWidth, a.Quantity, a.Currency, indentStr, title)
+			} else {
+				fmt.Printf("%*s %s\n", amountColWidth, a.Quantity, a.Currency)
+			}
+		}
+	}
+	for _, child := range node.Children {
+		c.printAccountBalance(child, indent+1)
+	}
 }
 
 func parseDate(s, layout string) (string, error) {
