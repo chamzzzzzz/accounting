@@ -7,15 +7,19 @@ import (
 	"github.com/chamzzzzzz/accounting/account"
 	"github.com/chamzzzzzz/accounting/book"
 	"github.com/chamzzzzzz/accounting/journal"
+	"github.com/chamzzzzzz/accounting/report"
 	"github.com/chamzzzzzz/accounting/sourcedocument/processor"
 	"github.com/chamzzzzzz/accounting/sourcedocument/scanner"
 	"github.com/chamzzzzzz/accounting/voucher"
 )
 
 type (
-	Account = account.Account
-	Voucher = voucher.Voucher
-	Journal = journal.Journal
+	Account               = account.Account
+	Voucher               = voucher.Voucher
+	Journal               = journal.Journal
+	Parameters            = report.ReportParameters
+	AccountBalanceReport  = report.AccountBalanceReport
+	AccountRegisterReport = report.AccountRegisterReport
 )
 
 var (
@@ -118,4 +122,18 @@ func (a *Accountant) AddVoucher(voucher *Voucher) error {
 	}
 	j.Vouchers = append(j.Vouchers, voucher)
 	return nil
+}
+
+func (a *Accountant) ReportAccountBalance(parameters *Parameters) (*AccountBalanceReport, error) {
+	if a.Book == nil {
+		return nil, ErrNoBook
+	}
+	return nil, nil
+}
+
+func (a *Accountant) ReportAccountRegister(parameters *Parameters) (*AccountRegisterReport, error) {
+	if a.Book == nil {
+		return nil, ErrNoBook
+	}
+	return nil, nil
 }
