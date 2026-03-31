@@ -385,5 +385,89 @@ func (a *Accountant) ReportAccountRegister(parameters *ReportParameters) (*Accou
 	if a.Book == nil {
 		return nil, ErrNoBook
 	}
-	return nil, nil
+
+	matchAll := false
+	targetAccounts := make(map[string]bool)
+	if parameters != nil {
+		for _, title := range parameters.Titles {
+			normalized := normalizeAccountTitle(title)
+			if normalized == "" {
+				matchAll = true
+				break
+			}
+			targetAccounts[normalized] = true
+		}
+	} else {
+		matchAll = true
+	}
+
+	isMatch := func(accountTitle string) bool {
+		if matchAll {
+			return true
+		}
+		normalized := normalizeAccountTitle(accountTitle)
+		for target := range targetAccounts {
+			if normalized == target || strings.HasPrefix(normalized, target+":") {
+				return true
+			}
+		}
+		return false
+	}
+
+	type voucherWithDate struct {
+		v    *voucher.Voucher
+		date time.Time
+	}
+	var allVouchers []voucherWithDate
+	for _, j := range a.Book.Journals {
+		for _, v := range j.Vouchers {
+			t, err := time.ParseInLocation(time.RFC3339, v.Date, time.Local)
+			if err != nil {
+				t, _ = time.Parse("2006-01-02", v.Date)
+			}
+			allVouchers = append(allVouchers, voucherWithDate{v: v, date: t})
+		}
+	}
+
+	sort.Slice(allVouchers, func(i, j int) bool {
+		if !allVouchers[i].date.Equal(allVouchers[j].date) {
+			return allVouchers[i].date.Before(allVouchers[j].date)
+		}
+		return allVouchers[i].v.Id < allVouchers[j].v.Id
+	})
+
+	var registers []*report.AccountRegister
+	runningBalances := make(map[string]float64)
+
+	for _, vd := range allVouchers {
+		v := vd.v
+		for _, e := range v.Entries {
+			if isMatch(e.Account) {
+				q, _ := strconv.ParseFloat(e.Amount.Quantity, 64)
+				runningBalances[e.Amount.Currency] = roundAmount(runningBalances[e.Amount.Currency] + q)
+
+				var balances []*amount.Amount
+				currencies := make([]string, 0, len(runningBalances))
+				for c := range runningBalances {
+					currencies = append(currencies, c)
+				}
+				sort.Strings(currencies)
+				for _, c := range currencies {
+					balances = append(balances, &amount.Amount{
+						Quantity: formatAmount(runningBalances[c]),
+						Currency: c,
+					})
+				}
+
+				registers = append(registers, &report.AccountRegister{
+					Title:    e.Account,
+					Amounts:  []*amount.Amount{e.Amount},
+					Balances: balances,
+					Voucher:  v,
+				})
+			}
+		}
+	}
+
+	return &AccountRegisterReport{Register: registers}, nil
 }

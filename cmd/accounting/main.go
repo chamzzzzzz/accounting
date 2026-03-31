@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/chamzzzzzz/accounting/account"
 	"github.com/chamzzzzzz/accounting/accountant"
@@ -169,6 +170,8 @@ func (c *CLI) runReport() error {
 	switch c.subcmd {
 	case "balance":
 		return c.cmdReportBalance()
+	case "register":
+		return c.cmdReportRegister()
 	default:
 		c.printReportHelp()
 		return nil
@@ -319,6 +322,7 @@ func (c *CLI) printReportHelp() {
 
 Subcommands:
   balance   Show account balance report
+  register  Show account register report
   help      Show this help
 
 Options:
@@ -566,6 +570,179 @@ func (c *CLI) printAccountBalance(b *report.AccountBalance, indent int) {
 	}
 	for _, child := range node.Children {
 		c.printAccountBalance(child, indent+1)
+	}
+}
+
+func (c *CLI) cmdReportRegister() error {
+	titles := c.titles
+	if len(c.args) > 2 {
+		titles = append(titles, c.args[2:]...)
+	}
+
+	return c.accounting(false, func(bk *book.Book, acc *accountant.Accountant) error {
+		r, err := acc.ReportAccountRegister(&report.ReportParameters{
+			Titles: titles,
+		})
+		if err != nil {
+			return err
+		}
+
+		c.printAccountRegisterReport(r)
+		return nil
+	})
+}
+
+func (c *CLI) printAccountRegisterReport(r *report.AccountRegisterReport) {
+	dateWidth := len("2006-01-02 15:04")
+	descWidth := 0
+	titleWidth := 0
+	amtWidth := 0
+	balWidth := 0
+
+	formatQuantity := func(q string) string {
+		f, _ := strconv.ParseFloat(q, 64)
+		s := fmt.Sprintf("%.2f", f)
+		if f < 0 {
+			s = s[1:]
+		}
+		parts := strings.Split(s, ".")
+		integer := parts[0]
+		fraction := parts[1]
+		var result []string
+		for i := len(integer); i > 0; i -= 3 {
+			start := i - 3
+			if start < 0 {
+				start = 0
+			}
+			result = append([]string{integer[start:i]}, result...)
+		}
+		res := strings.Join(result, ",") + "." + fraction
+		if f < 0 {
+			res = "-" + res
+		}
+		return res
+	}
+
+	displayWidth := func(s string) int {
+		width := 0
+		for _, r := range s {
+			switch {
+			case r == '\t':
+				width += 4
+			case unicode.IsControl(r):
+				continue
+			case r >= 0x1100 && (r <= 0x115F ||
+				r == 0x2329 || r == 0x232A ||
+				(r >= 0x2E80 && r <= 0xA4CF && r != 0x303F) ||
+				(r >= 0xAC00 && r <= 0xD7A3) ||
+				(r >= 0xF900 && r <= 0xFAFF) ||
+				(r >= 0xFE10 && r <= 0xFE19) ||
+				(r >= 0xFE30 && r <= 0xFE6F) ||
+				(r >= 0xFF00 && r <= 0xFF60) ||
+				(r >= 0xFFE0 && r <= 0xFFE6) ||
+				(r >= 0x1F300 && r <= 0x1FAFF)):
+				width += 2
+			case unicode.In(r,
+				unicode.Han,
+				unicode.Hangul,
+				unicode.Hiragana,
+				unicode.Katakana,
+				unicode.Bopomofo):
+				width += 2
+			default:
+				width++
+			}
+		}
+		return width
+	}
+
+	padRight := func(s string, width int) string {
+		padding := width - displayWidth(s)
+		if padding <= 0 {
+			return s
+		}
+		return s + strings.Repeat(" ", padding)
+	}
+
+	padLeft := func(s string, width int) string {
+		padding := width - displayWidth(s)
+		if padding <= 0 {
+			return s
+		}
+		return strings.Repeat(" ", padding) + s
+	}
+
+	for _, reg := range r.Register {
+		desc := reg.Voucher.Description
+		if desc == "" {
+			desc = reg.Voucher.Catalog
+		}
+		if displayWidth(desc) > descWidth {
+			descWidth = displayWidth(desc)
+		}
+		if displayWidth(reg.Title) > titleWidth {
+			titleWidth = displayWidth(reg.Title)
+		}
+		for _, amt := range reg.Amounts {
+			l := displayWidth(formatQuantity(amt.Quantity) + " " + amt.Currency)
+			if l > amtWidth {
+				amtWidth = l
+			}
+		}
+		for _, bal := range reg.Balances {
+			l := displayWidth(formatQuantity(bal.Quantity) + " " + bal.Currency)
+			if l > balWidth {
+				balWidth = l
+			}
+		}
+	}
+
+	for _, reg := range r.Register {
+		t, err := time.ParseInLocation(time.RFC3339, reg.Voucher.Date, time.Local)
+		if err != nil {
+			t, _ = time.Parse("2006-01-02", reg.Voucher.Date)
+		}
+		dateStr := t.Format("2006-01-02 15:04")
+		desc := reg.Voucher.Description
+		if desc == "" {
+			desc = reg.Voucher.Catalog
+		}
+
+		firstAmt := reg.Amounts[0]
+		firstBal := reg.Balances[0]
+		firstAmtStr := formatQuantity(firstAmt.Quantity) + " " + firstAmt.Currency
+		firstBalStr := formatQuantity(firstBal.Quantity) + " " + firstBal.Currency
+
+		fmt.Println(
+			padRight(dateStr, dateWidth) + "  " +
+				padRight(desc, descWidth) + "  " +
+				padRight(reg.Title, titleWidth) + "  " +
+				padLeft(firstAmtStr, amtWidth) + "  " +
+				padLeft(firstBalStr, balWidth),
+		)
+
+		maxLen := len(reg.Amounts)
+		if len(reg.Balances) > maxLen {
+			maxLen = len(reg.Balances)
+		}
+
+		for i := 1; i < maxLen; i++ {
+			amtStr := ""
+			balStr := ""
+			if i < len(reg.Amounts) {
+				amtStr = formatQuantity(reg.Amounts[i].Quantity) + " " + reg.Amounts[i].Currency
+			}
+			if i < len(reg.Balances) {
+				balStr = formatQuantity(reg.Balances[i].Quantity) + " " + reg.Balances[i].Currency
+			}
+			fmt.Println(
+				padRight("", dateWidth) + "  " +
+					padRight("", descWidth) + "  " +
+					padRight("", titleWidth) + "  " +
+					padLeft(amtStr, amtWidth) + "  " +
+					padLeft(balStr, balWidth),
+			)
+		}
 	}
 }
 
