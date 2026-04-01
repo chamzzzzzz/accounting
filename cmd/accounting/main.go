@@ -3,8 +3,10 @@ package main
 import (
 	"context"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"strconv"
 	"strings"
@@ -528,16 +530,20 @@ func (c *CLI) printAccountBalanceReportTotal(r *report.AccountBalanceReport) {
 	}
 
 	var currencies []string
-	for cur := range totals {
-		currencies = append(currencies, cur)
-	}
-	sort.Strings(currencies)
-
-	if len(currencies) > 0 {
-		fmt.Printf("%s\n", lineSeparator)
-		for _, cur := range currencies {
-			fmt.Printf("%*s %s\n", amountColWidth, fmt.Sprintf("%.2f", totals[cur]), cur)
+	for cur, total := range totals {
+		if math.Abs(total) > 0.001 {
+			currencies = append(currencies, cur)
 		}
+	}
+
+	if len(currencies) == 0 {
+		return
+	}
+
+	sort.Strings(currencies)
+	fmt.Println(lineSeparator)
+	for _, cur := range currencies {
+		fmt.Printf("%*s %s\n", amountColWidth, fmt.Sprintf("%.2f", totals[cur]), cur)
 	}
 }
 
@@ -549,25 +555,37 @@ func (c *CLI) printAccountBalance(b *report.AccountBalance, indent int) {
 		title = parts[len(parts)-1]
 	}
 
-	for len(node.Children) == 1 {
+	// Consolidate paths if there's only one child with the same amounts
+	for len(node.Children) == 1 && reflect.DeepEqual(node.Amounts, node.Children[0].Amounts) {
 		child := node.Children[0]
 		childParts := strings.Split(child.Title, ":")
 		title += ":" + childParts[len(childParts)-1]
 		node = child
 	}
 
-	indentStr := strings.Repeat("  ", indent)
-	if len(node.Amounts) == 0 {
-		fmt.Printf("%*s  %s%s\n", amountColWidth+1+3, "", indentStr, title)
-	} else {
-		for i, a := range node.Amounts {
-			if i == 0 {
-				fmt.Printf("%*s %s  %s%s\n", amountColWidth, a.Quantity, a.Currency, indentStr, title)
-			} else {
-				fmt.Printf("%*s %s\n", amountColWidth, a.Quantity, a.Currency)
-			}
+	// Filter and format non-zero amounts
+	var nonZeroLines []string
+	for _, a := range node.Amounts {
+		if q, _ := strconv.ParseFloat(a.Quantity, 64); math.Abs(q) > 0.001 {
+			nonZeroLines = append(nonZeroLines, fmt.Sprintf("%*s %s", amountColWidth, a.Quantity, a.Currency))
 		}
 	}
+
+	// Output non-zero amounts and account title
+	indentStr := strings.Repeat("  ", indent)
+	if len(nonZeroLines) > 0 {
+		for i, line := range nonZeroLines {
+			if i == 0 {
+				fmt.Printf("%s  %s%s\n", line, indentStr, title)
+			} else {
+				fmt.Printf("%s\n", line)
+			}
+		}
+	} else if len(node.Children) > 0 {
+		// Parent node with zero balance but non-zero children
+		fmt.Printf("%*s  %s%s\n", amountColWidth+1+3, "", indentStr, title)
+	}
+
 	for _, child := range node.Children {
 		c.printAccountBalance(child, indent+1)
 	}
@@ -690,9 +708,11 @@ func (c *CLI) printAccountRegisterReport(r *report.AccountRegisterReport) {
 			}
 		}
 		for _, bal := range reg.Balances {
-			l := displayWidth(formatQuantity(bal.Quantity) + " " + bal.Currency)
-			if l > balWidth {
-				balWidth = l
+			if q, _ := strconv.ParseFloat(bal.Quantity, 64); math.Abs(q) > 0.001 {
+				l := displayWidth(formatQuantity(bal.Quantity) + " " + bal.Currency)
+				if l > balWidth {
+					balWidth = l
+				}
 			}
 		}
 	}
@@ -708,10 +728,22 @@ func (c *CLI) printAccountRegisterReport(r *report.AccountRegisterReport) {
 			desc = reg.Voucher.Catalog
 		}
 
-		firstAmt := reg.Amounts[0]
-		firstBal := reg.Balances[0]
-		firstAmtStr := formatQuantity(firstAmt.Quantity) + " " + firstAmt.Currency
-		firstBalStr := formatQuantity(firstBal.Quantity) + " " + firstBal.Currency
+		var nonZeroBalances []*amount.Amount
+		for _, bal := range reg.Balances {
+			if q, _ := strconv.ParseFloat(bal.Quantity, 64); math.Abs(q) > 0.001 {
+				nonZeroBalances = append(nonZeroBalances, bal)
+			}
+		}
+
+		firstAmtStr := ""
+		if len(reg.Amounts) > 0 {
+			firstAmtStr = formatQuantity(reg.Amounts[0].Quantity) + " " + reg.Amounts[0].Currency
+		}
+
+		firstBalStr := ""
+		if len(nonZeroBalances) > 0 {
+			firstBalStr = formatQuantity(nonZeroBalances[0].Quantity) + " " + nonZeroBalances[0].Currency
+		}
 
 		fmt.Println(
 			padRight(dateStr, dateWidth) + "  " +
@@ -722,8 +754,8 @@ func (c *CLI) printAccountRegisterReport(r *report.AccountRegisterReport) {
 		)
 
 		maxLen := len(reg.Amounts)
-		if len(reg.Balances) > maxLen {
-			maxLen = len(reg.Balances)
+		if len(nonZeroBalances) > maxLen {
+			maxLen = len(nonZeroBalances)
 		}
 
 		for i := 1; i < maxLen; i++ {
@@ -732,8 +764,8 @@ func (c *CLI) printAccountRegisterReport(r *report.AccountRegisterReport) {
 			if i < len(reg.Amounts) {
 				amtStr = formatQuantity(reg.Amounts[i].Quantity) + " " + reg.Amounts[i].Currency
 			}
-			if i < len(reg.Balances) {
-				balStr = formatQuantity(reg.Balances[i].Quantity) + " " + reg.Balances[i].Currency
+			if i < len(nonZeroBalances) {
+				balStr = formatQuantity(nonZeroBalances[i].Quantity) + " " + nonZeroBalances[i].Currency
 			}
 			fmt.Println(
 				padRight("", dateWidth) + "  " +
