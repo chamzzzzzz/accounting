@@ -7,6 +7,7 @@ import (
 type Entry struct {
 	Account string         `json:"account,omitempty"`
 	Amount  *amount.Amount `json:"amount,omitempty"`
+	Comment string         `json:"comment,omitempty"`
 }
 
 type Voucher struct {
@@ -15,4 +16,5 @@ type Voucher struct {
 	Catalog     string   `json:"catalog,omitempty"`
 	Entries     []*Entry `json:"entries,omitempty"`
 	Description string   `json:"description,omitempty"`
+	Comment     string   `json:"comment,omitempty"`
 }
