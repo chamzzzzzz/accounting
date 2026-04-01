@@ -303,78 +303,50 @@ func (a *Accountant) ReportAccountBalance(parameters *ReportParameters) (*Accoun
 		aggregate(root)
 	}
 
-	selectAll := parameters == nil || len(parameters.Titles) == 0
-	targetTitles := map[string]bool{}
-	if !selectAll {
+	if parameters != nil && len(parameters.Titles) > 0 {
+		titles := make([]string, 0, len(parameters.Titles))
 		for _, title := range parameters.Titles {
 			normalized := normalizeAccountTitle(title)
-			if normalized == "" {
-				selectAll = true
-				break
+			if normalized != "" {
+				titles = append(titles, normalized)
 			}
-			targetTitles[normalized] = true
 		}
+		sort.Strings(titles)
+
+		unique := make([]string, 0, len(titles))
+		for i := 0; i < len(titles); i++ {
+			isSub := false
+			for j := 0; j < len(titles); j++ {
+				if i == j {
+					continue
+				}
+				if titles[i] == titles[j] && i > j {
+					isSub = true
+					break
+				}
+				if strings.HasPrefix(titles[i], titles[j]+":") {
+					isSub = true
+					break
+				}
+			}
+			if !isSub {
+				unique = append(unique, titles[i])
+			}
+		}
+
+		balance := []*report.AccountBalance{}
+		for _, title := range unique {
+			if node, ok := nodes[title]; ok {
+				balance = append(balance, node)
+			}
+		}
+		return &report.AccountBalanceReport{Balance: balance}, nil
 	}
 
 	balance := []*report.AccountBalance{}
 	for _, root := range rootOrder {
-		node := nodes[root]
-		if node == nil {
-			continue
-		}
-		if selectAll {
+		if node, ok := nodes[root]; ok {
 			balance = append(balance, node)
-		} else {
-			var filterNode func(*report.AccountBalance) *report.AccountBalance
-			filterNode = func(n *report.AccountBalance) *report.AccountBalance {
-				if targetTitles[n.Title] {
-					return &report.AccountBalance{
-						Title:    n.Title,
-						Amounts:  n.Amounts,
-						Children: n.Children,
-					}
-				}
-
-				isPrefixOfTarget := false
-				for target := range targetTitles {
-					if strings.HasPrefix(target, n.Title+":") {
-						isPrefixOfTarget = true
-						break
-					}
-				}
-
-				if isPrefixOfTarget {
-					var newChildren []*report.AccountBalance
-					newTotals := make(map[string]float64)
-					for _, child := range n.Children {
-						if filteredChild := filterNode(child); filteredChild != nil {
-							newChildren = append(newChildren, filteredChild)
-							for _, a := range filteredChild.Amounts {
-								v, _ := strconv.ParseFloat(a.Quantity, 64)
-								newTotals[a.Currency] = roundAmount(newTotals[a.Currency] + v)
-							}
-						}
-					}
-					if len(newChildren) > 0 {
-						return &report.AccountBalance{
-							Title:    n.Title,
-							Amounts:  buildAmounts(newTotals),
-							Children: newChildren,
-						}
-					}
-				}
-
-				for target := range targetTitles {
-					if strings.HasPrefix(n.Title, target+":") {
-						return n
-					}
-				}
-
-				return nil
-			}
-			if filtered := filterNode(node); filtered != nil {
-				balance = append(balance, filtered)
-			}
 		}
 	}
 

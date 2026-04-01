@@ -537,17 +537,47 @@ func (c *CLI) printAccountBalanceReportTotal(r *report.AccountBalanceReport) {
 	}
 
 	if len(currencies) == 0 {
+		fmt.Println(lineSeparator)
+		fmt.Printf("%*s\n", len(lineSeparator), "0")
 		return
 	}
 
 	sort.Strings(currencies)
 	fmt.Println(lineSeparator)
 	for _, cur := range currencies {
-		fmt.Printf("%*s %s\n", amountColWidth, fmt.Sprintf("%.2f", totals[cur]), cur)
+		s := fmt.Sprintf("%.2f %s", totals[cur], cur)
+		fmt.Printf("%*s\n", len(lineSeparator), s)
 	}
 }
 
 func (c *CLI) printAccountBalance(b *report.AccountBalance, indent int) {
+	// Filter children to only those with non-zero balances in their subtree
+	var hasNonZeroBalance func(*report.AccountBalance) bool
+	hasNonZeroBalance = func(n *report.AccountBalance) bool {
+		for _, a := range n.Amounts {
+			if q, _ := strconv.ParseFloat(a.Quantity, 64); math.Abs(q) > 0.001 {
+				return true
+			}
+		}
+		for _, child := range n.Children {
+			if hasNonZeroBalance(child) {
+				return true
+			}
+		}
+		return false
+	}
+
+	if !hasNonZeroBalance(b) {
+		return
+	}
+
+	var activeChildren []*report.AccountBalance
+	for _, child := range b.Children {
+		if hasNonZeroBalance(child) {
+			activeChildren = append(activeChildren, child)
+		}
+	}
+
 	node := b
 	title := b.Title
 	if indent > 0 {
@@ -555,12 +585,20 @@ func (c *CLI) printAccountBalance(b *report.AccountBalance, indent int) {
 		title = parts[len(parts)-1]
 	}
 
-	// Consolidate paths if there's only one child with the same amounts
-	for len(node.Children) == 1 && reflect.DeepEqual(node.Amounts, node.Children[0].Amounts) {
-		child := node.Children[0]
+	// Consolidate paths if there's only one active child with the same non-zero amounts
+	for len(activeChildren) == 1 && reflect.DeepEqual(node.Amounts, activeChildren[0].Amounts) {
+		child := activeChildren[0]
 		childParts := strings.Split(child.Title, ":")
 		title += ":" + childParts[len(childParts)-1]
 		node = child
+
+		// Update active children for the next iteration
+		activeChildren = nil
+		for _, nextChild := range node.Children {
+			if hasNonZeroBalance(nextChild) {
+				activeChildren = append(activeChildren, nextChild)
+			}
+		}
 	}
 
 	// Filter and format non-zero amounts
@@ -581,12 +619,12 @@ func (c *CLI) printAccountBalance(b *report.AccountBalance, indent int) {
 				fmt.Printf("%s\n", line)
 			}
 		}
-	} else if len(node.Children) > 0 {
+	} else if len(activeChildren) > 0 {
 		// Parent node with zero balance but non-zero children
 		fmt.Printf("%*s  %s%s\n", amountColWidth+1+3, "", indentStr, title)
 	}
 
-	for _, child := range node.Children {
+	for _, child := range activeChildren {
 		c.printAccountBalance(child, indent+1)
 	}
 }
