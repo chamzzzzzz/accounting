@@ -8,6 +8,7 @@ type Location struct {
 }
 
 type Annotation struct {
+	Label    string    `json:"label,omitempty"`
 	Text     string    `json:"text,omitempty"`
 	Location *Location `json:"location,omitempty"`
 }

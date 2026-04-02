@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"math"
 	"os"
@@ -20,6 +21,9 @@ import (
 	"github.com/chamzzzzzz/accounting/book/provider/ssfs"
 	"github.com/chamzzzzzz/accounting/journal"
 	"github.com/chamzzzzzz/accounting/report"
+	"github.com/chamzzzzzz/accounting/sourcedocument/scanner"
+	"github.com/chamzzzzzz/accounting/sourcedocument/scanner/ai"
+	"github.com/chamzzzzzz/accounting/sourcedocument/scanner/ai/openai"
 	"github.com/chamzzzzzz/accounting/voucher"
 )
 
@@ -34,6 +38,8 @@ type CLI struct {
 	catalog     string
 	description string
 	entries     []string
+	document    string
+	spec        string
 }
 
 func main() {
@@ -92,6 +98,9 @@ func (c *CLI) Run() error {
 		case "report":
 			c.printReportHelp()
 			return nil
+		case "sourcedocument":
+			c.printSourceDocumentHelp()
+			return nil
 		default:
 			c.printHelp()
 			return nil
@@ -112,12 +121,52 @@ func (c *CLI) Run() error {
 		return c.runVoucher()
 	case "report":
 		return c.runReport()
+	case "sourcedocument":
+		return c.runSourceDocument()
 	default:
 		fmt.Fprintf(os.Stderr, "unknown command: %s\n", c.cmd)
 		c.printHelp()
 		os.Exit(1)
 	}
 	return nil
+}
+
+func (c *CLI) runSourceDocument() error {
+	switch c.subcmd {
+	case "scan":
+		return c.cmdSourceDocumentScan()
+	default:
+		c.printSourceDocumentHelp()
+		return nil
+	}
+}
+
+func (c *CLI) cmdSourceDocumentScan() error {
+	if c.document == "" {
+		return fmt.Errorf("document is required")
+	}
+
+	var spec ai.Spec
+	if c.spec != "" {
+		b, err := os.ReadFile(c.spec)
+		if err != nil {
+			return err
+		}
+		if err := json.Unmarshal(b, &spec); err != nil {
+			return err
+		}
+	}
+
+	s := &openai.Scanner{Spec: spec}
+	doc := &scanner.Document{Path: c.document}
+	sd, err := s.Scan(context.Background(), doc)
+	if err != nil {
+		return err
+	}
+
+	encoder := json.NewEncoder(os.Stdout)
+	encoder.SetIndent("", "  ")
+	return encoder.Encode(sd)
 }
 
 func (c *CLI) runBook() error {
@@ -244,6 +293,16 @@ func (c *CLI) parseFlags() {
 				c.entries = append(c.entries, c.args[i+1])
 				i++
 			}
+		case "--document":
+			if i+1 < len(c.args) && c.args[i+1][0] != '-' {
+				c.document = c.args[i+1]
+				i++
+			}
+		case "--spec":
+			if i+1 < len(c.args) && c.args[i+1][0] != '-' {
+				c.spec = c.args[i+1]
+				i++
+			}
 		default:
 			args = append(args, c.args[i])
 		}
@@ -263,6 +322,7 @@ Commands:
   journal   Journal management
   voucher   Voucher management
   report    Report management
+  sourcedocument  Source document management
 
 Options:
   --book, -b  Book directory (default: ".")
@@ -329,6 +389,18 @@ Subcommands:
 
 Options:
   --title, -t  Account title (repeatable)`)
+}
+
+func (c *CLI) printSourceDocumentHelp() {
+	fmt.Println(`Usage: accounting sourcedocument <subcommand> [options]
+
+Subcommands:
+  scan      Scan a source document
+  help      Show this help
+
+Options:
+  --document  Path to the document (required)
+  --spec      Path to the scanner spec file (optional)`)
 }
 
 func (c *CLI) cmdBookCreate() error {
