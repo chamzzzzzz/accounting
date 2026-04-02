@@ -24,7 +24,11 @@ import (
 	"github.com/chamzzzzzz/accounting/sourcedocument/scanner"
 	"github.com/chamzzzzzz/accounting/sourcedocument/scanner/ai"
 	"github.com/chamzzzzzz/accounting/sourcedocument/scanner/ai/openai"
+	"github.com/chamzzzzzz/accounting/sourcedocument/scanner/ocr"
+	"github.com/chamzzzzzz/accounting/sourcedocument/scanner/ocr/normalizer"
 	"github.com/chamzzzzzz/accounting/voucher"
+	"github.com/chamzzzzzz/gocr"
+	"github.com/chamzzzzzz/gocr/macocr"
 )
 
 type CLI struct {
@@ -40,6 +44,7 @@ type CLI struct {
 	entries     []string
 	document    string
 	spec        string
+	scanner     string
 }
 
 func main() {
@@ -146,18 +151,11 @@ func (c *CLI) cmdSourceDocumentScan() error {
 		return fmt.Errorf("document is required")
 	}
 
-	var spec ai.Spec
-	if c.spec != "" {
-		b, err := os.ReadFile(c.spec)
-		if err != nil {
-			return err
-		}
-		if err := json.Unmarshal(b, &spec); err != nil {
-			return err
-		}
+	s, err := c.createScanner()
+	if err != nil {
+		return err
 	}
 
-	s := &openai.Scanner{Spec: spec}
 	doc := &scanner.Document{Path: c.document}
 	sd, err := s.Scan(context.Background(), doc)
 	if err != nil {
@@ -167,6 +165,52 @@ func (c *CLI) cmdSourceDocumentScan() error {
 	encoder := json.NewEncoder(os.Stdout)
 	encoder.SetIndent("", "  ")
 	return encoder.Encode(sd)
+}
+
+func (c *CLI) createScanner() (scanner.Scanner, error) {
+	sc := c.scanner
+	if sc == "" {
+		sc = "ocr"
+	}
+
+	switch sc {
+	case "ocr":
+		var spec gocr.Option
+		if c.spec != "" {
+			b, err := os.ReadFile(c.spec)
+			if err != nil {
+				return nil, err
+			}
+			if err := json.Unmarshal(b, &spec); err != nil {
+				return nil, err
+			}
+		}
+		if spec.Type == "" {
+			spec.Type = "macocr"
+		}
+
+		ws := gocr.NewWorkspace()
+		ws.RegisterCreator(&macocr.Creator{})
+		r, err := ws.CreateRecognizer(&spec)
+		if err != nil {
+			return nil, err
+		}
+		return &ocr.Scanner{Recognizer: r, Normalizer: &normalizer.Normalizer{}}, nil
+	case "openai":
+		var spec ai.Spec
+		if c.spec != "" {
+			b, err := os.ReadFile(c.spec)
+			if err != nil {
+				return nil, err
+			}
+			if err := json.Unmarshal(b, &spec); err != nil {
+				return nil, err
+			}
+		}
+		return &openai.Scanner{Spec: spec}, nil
+	default:
+		return nil, fmt.Errorf("unknown scanner: %s", c.scanner)
+	}
 }
 
 func (c *CLI) runBook() error {
@@ -303,6 +347,11 @@ func (c *CLI) parseFlags() {
 				c.spec = c.args[i+1]
 				i++
 			}
+		case "--scanner":
+			if i+1 < len(c.args) && c.args[i+1][0] != '-' {
+				c.scanner = c.args[i+1]
+				i++
+			}
 		default:
 			args = append(args, c.args[i])
 		}
@@ -400,7 +449,8 @@ Subcommands:
 
 Options:
   --document  Path to the document (required)
-  --spec      Path to the scanner spec file (optional)`)
+  --spec      Path to the scanner spec file (optional)
+  --scanner   Scanner type (openai, ocr, default: ocr)`)
 }
 
 func (c *CLI) cmdBookCreate() error {
