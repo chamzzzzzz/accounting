@@ -1,5 +1,6 @@
 package account
 
 type Account struct {
-	Title string `json:"title,omitempty"`
+	Catalog string `json:"catalog,omitempty"`
+	Title   string `json:"title,omitempty"`
 }

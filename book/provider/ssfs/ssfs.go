@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/chamzzzzzz/accounting/account"
@@ -66,6 +67,11 @@ func (p *Provider) Save(ctx context.Context, book *Book) error {
 	if accounts == nil {
 		accounts = []*Account{}
 	}
+
+	if err := checkAccounts(accounts); err != nil {
+		return err
+	}
+
 	if err := writeInfo(path, info); err != nil {
 		return err
 	}
@@ -96,20 +102,83 @@ func writeInfo(path string, info *Info) error {
 }
 
 func readAccounts(path string) ([]*Account, error) {
-	name := filepath.Join(path, "ACCOUNTS")
-	var accounts []*Account
-	if err := read(name, &accounts); err != nil {
+	root := filepath.Join(path, "ACCOUNTS")
+	fi, err := os.Stat(root)
+	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, nil
 		}
+		return nil, err
+	}
+	if !fi.IsDir() {
+		return nil, errors.New("ACCOUNTS is not a directory")
+	}
+
+	var accounts []*Account
+	if err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			return nil
+		}
+		var list []*Account
+		if err := read(path, &list); err != nil {
+			return err
+		}
+		accounts = append(accounts, list...)
+		return nil
+	}); err != nil {
 		return nil, err
 	}
 	return accounts, nil
 }
 
 func writeAccounts(path string, accounts []*Account) error {
-	name := filepath.Join(path, "ACCOUNTS")
-	return write(name, accounts)
+	root := filepath.Join(path, "ACCOUNTS")
+	if err := os.RemoveAll(root); err != nil {
+		return err
+	}
+	if err := os.MkdirAll(root, 0755); err != nil {
+		return err
+	}
+
+	catalogs, err := catalogAccounts(accounts)
+	if err != nil {
+		return err
+	}
+	for catalog, accounts := range catalogs {
+		name := filepath.Join(root, catalog)
+		if err := write(name, accounts); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func catalogAccounts(accounts []*Account) (map[string][]*Account, error) {
+	catalogs := make(map[string][]*Account)
+	for _, account := range accounts {
+		if account.Catalog == "" {
+			return nil, errors.New("no account catalog")
+		}
+		catalogs[account.Catalog] = append(catalogs[account.Catalog], account)
+	}
+	for k1 := range catalogs {
+		for k2 := range catalogs {
+			if k1 != k2 && (strings.HasPrefix(k1, k2) || strings.HasPrefix(k2, k1)) {
+				return nil, errors.New("account catalog conflict: " + k1 + " and " + k2)
+			}
+		}
+	}
+	return catalogs, nil
+}
+
+func checkAccounts(accounts []*Account) error {
+	if _, err := catalogAccounts(accounts); err != nil {
+		return err
+	}
+	return nil
 }
 
 func readJournals(path string) ([]*Journal, error) {

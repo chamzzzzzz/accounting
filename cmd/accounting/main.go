@@ -397,7 +397,8 @@ Subcommands:
   help      Show this help
 
 Options:
-  --title, -t  Account title (required)`)
+  --title, -t    Account title (required)
+  --catalog, -c  Account catalog (required)`)
 }
 
 func (c *CLI) printJournalHelp() {
@@ -486,9 +487,12 @@ func (c *CLI) cmdAccountAdd() error {
 	if len(c.titles) == 0 {
 		return fmt.Errorf("--title is required")
 	}
+	if c.catalog == "" {
+		return fmt.Errorf("--catalog is required")
+	}
 	err := c.accounting(true, func(bk *book.Book, acc *accountant.Accountant) error {
 		for _, title := range c.titles {
-			if err := acc.AddAccount(&account.Account{Title: title}); err != nil {
+			if err := acc.AddAccount(&account.Account{Title: title, Catalog: c.catalog}); err != nil {
 				return err
 			}
 		}
@@ -498,7 +502,7 @@ func (c *CLI) cmdAccountAdd() error {
 		return err
 	}
 	for _, title := range c.titles {
-		fmt.Printf("Account added: %s\n", title)
+		fmt.Printf("Account added: %s (Catalog: %s)\n", title, c.catalog)
 	}
 	return nil
 }

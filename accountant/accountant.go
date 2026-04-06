@@ -62,6 +62,12 @@ func (a *Accountant) AddAccount(account *Account) error {
 	if a.Book == nil {
 		return ErrNoBook
 	}
+	if account.Title == "" {
+		return errors.New("no account title")
+	}
+	if account.Catalog == "" {
+		return errors.New("no account catalog")
+	}
 	a.Book.Accounts = append(a.Book.Accounts, account)
 	return nil
 }
