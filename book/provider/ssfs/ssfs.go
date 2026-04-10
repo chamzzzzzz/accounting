@@ -102,7 +102,7 @@ func writeInfo(path string, info *Info) error {
 }
 
 func readAccounts(path string) ([]*Account, error) {
-	root := filepath.Join(path, "ACCOUNTS")
+	root := filepath.Join(path, "ACCOUNT")
 	fi, err := os.Stat(root)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -111,7 +111,7 @@ func readAccounts(path string) ([]*Account, error) {
 		return nil, err
 	}
 	if !fi.IsDir() {
-		return nil, errors.New("ACCOUNTS is not a directory")
+		return nil, errors.New("ACCOUNT is not a directory")
 	}
 
 	var accounts []*Account
@@ -135,7 +135,7 @@ func readAccounts(path string) ([]*Account, error) {
 }
 
 func writeAccounts(path string, accounts []*Account) error {
-	root := filepath.Join(path, "ACCOUNTS")
+	root := filepath.Join(path, "ACCOUNT")
 	if err := os.RemoveAll(root); err != nil {
 		return err
 	}
@@ -182,7 +182,7 @@ func checkAccounts(accounts []*Account) error {
 }
 
 func readJournals(path string) ([]*Journal, error) {
-	root := filepath.Join(path, "JOURNALS")
+	root := filepath.Join(path, "JOURNAL")
 	fi, err := os.Stat(root)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -191,7 +191,7 @@ func readJournals(path string) ([]*Journal, error) {
 		return nil, err
 	}
 	if !fi.IsDir() {
-		return nil, errors.New("JOURNALS is not a directory")
+		return nil, errors.New("JOURNAL is not a directory")
 	}
 
 	var journals []*Journal
@@ -215,7 +215,7 @@ func readJournals(path string) ([]*Journal, error) {
 }
 
 func writeJournals(path string, journals []*Journal) error {
-	root := filepath.Join(path, "JOURNALS")
+	root := filepath.Join(path, "JOURNAL")
 	if err := os.RemoveAll(root); err != nil {
 		return err
 	}
