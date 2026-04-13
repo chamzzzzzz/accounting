@@ -18,6 +18,7 @@ import (
 	"github.com/chamzzzzzz/accounting/accountant"
 	"github.com/chamzzzzzz/accounting/amount"
 	"github.com/chamzzzzzz/accounting/book"
+	"github.com/chamzzzzzz/accounting/book/provider/ledger"
 	"github.com/chamzzzzzz/accounting/book/provider/ssfs"
 	"github.com/chamzzzzzz/accounting/journal"
 	"github.com/chamzzzzzz/accounting/report"
@@ -34,6 +35,7 @@ import (
 type CLI struct {
 	args        []string
 	dir         string
+	format      string
 	provider    book.Provider
 	cmd         string
 	subcmd      string
@@ -49,8 +51,9 @@ type CLI struct {
 
 func main() {
 	cli := &CLI{
-		args: os.Args[1:],
-		dir:  ".",
+		args:   os.Args[1:],
+		dir:    ".",
+		format: "ssfs",
 	}
 	if err := cli.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
@@ -113,7 +116,14 @@ func (c *CLI) Run() error {
 	}
 
 	c.dir, _ = filepath.Abs(c.dir)
-	c.provider = &ssfs.Provider{Dir: c.dir}
+	switch c.format {
+	case "ssfs":
+		c.provider = &ssfs.Provider{Dir: c.dir}
+	case "ledger":
+		c.provider = &ledger.Provider{Dir: c.dir}
+	default:
+		return fmt.Errorf("unknown provider: %s", c.format)
+	}
 
 	switch c.cmd {
 	case "book":
@@ -312,6 +322,11 @@ func (c *CLI) parseFlags() {
 				c.dir = c.args[i+1]
 				i++
 			}
+		case "--format", "-f":
+			if i+1 < len(c.args) && c.args[i+1][0] != '-' {
+				c.format = c.args[i+1]
+				i++
+			}
 		case "--title", "-t":
 			if i+1 < len(c.args) && c.args[i+1][0] != '-' {
 				c.titles = append(c.titles, c.args[i+1])
@@ -363,7 +378,7 @@ func (c *CLI) printHelp() {
 	fmt.Println(`accounting - Accounting CLI
 
 Usage:
-  accounting [--book <dir>] <command> [options]
+  accounting [--book <dir>] [--format <name>] <command> [options]
 
 Commands:
   book      Book management
@@ -374,7 +389,8 @@ Commands:
   sourcedocument  Source document management
 
 Options:
-  --book, -b  Book directory (default: ".")
+  --book, -b      Book directory (default: ".")
+  --format, -f    Book format (ssfs, ledger; default: ssfs)
 
 Use "accounting <command> help" for more information.`)
 }
