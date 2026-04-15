@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -282,6 +283,10 @@ func writeJournals(path string, journals []*Journal) error {
 		return err
 	}
 	for _, journal := range journals {
+		journal, err := formatJournal(journal)
+		if err != nil {
+			return err
+		}
 		if journal.Catalog == "" {
 			return errors.New("no journal catalog")
 		}
@@ -459,4 +464,37 @@ func writeJournalFile(path string, journal *Journal) error {
 	}
 
 	return os.WriteFile(path, []byte(sb.String()), 0644)
+}
+
+func formatJournal(journal *Journal) (*Journal, error) {
+	if len(journal.Vouchers) <= 1 {
+		return journal, nil
+	}
+
+	type e struct {
+		voucher *voucher.Voucher
+		date    time.Time
+	}
+
+	x := make([]e, 0, len(journal.Vouchers))
+	for _, v := range journal.Vouchers {
+		date, err := time.ParseInLocation(time.RFC3339, v.Date, time.Local)
+		if err != nil {
+			return nil, errors.New("invalid voucher date: " + v.Date)
+		}
+		x = append(x, e{voucher: v, date: date})
+	}
+
+	sort.SliceStable(x, func(i, j int) bool {
+		return x[i].date.Before(x[j].date)
+	})
+
+	j := &Journal{
+		Date:    journal.Date,
+		Catalog: journal.Catalog,
+	}
+	for _, e := range x {
+		j.Vouchers = append(j.Vouchers, e.voucher)
+	}
+	return j, nil
 }
