@@ -5,6 +5,7 @@ import (
 
 	"github.com/chamzzzzzz/accounting/account"
 	"github.com/chamzzzzzz/accounting/journal"
+	"github.com/chamzzzzzz/accounting/rule"
 )
 
 type Info struct {
@@ -16,6 +17,7 @@ type Book struct {
 	Info     *Info              `json:"info,omitempty"`
 	Accounts []*account.Account `json:"accounts,omitempty"`
 	Journals []*journal.Journal `json:"journals,omitempty"`
+	Rules    []*rule.Rule       `json:"rules,omitempty"`
 }
 
 type Provider interface {

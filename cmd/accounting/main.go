@@ -22,6 +22,7 @@ import (
 	"github.com/chamzzzzzz/accounting/book/provider/ssfs"
 	"github.com/chamzzzzzz/accounting/journal"
 	"github.com/chamzzzzzz/accounting/report"
+	"github.com/chamzzzzzz/accounting/rule"
 	"github.com/chamzzzzzz/accounting/sourcedocument/scanner"
 	"github.com/chamzzzzzz/accounting/sourcedocument/scanner/ai"
 	"github.com/chamzzzzzz/accounting/sourcedocument/scanner/ai/openai"
@@ -40,6 +41,7 @@ type CLI struct {
 	cmd         string
 	subcmd      string
 	titles      []string
+	name        string
 	date        string
 	catalog     string
 	description string
@@ -103,6 +105,9 @@ func (c *CLI) Run() error {
 		case "voucher":
 			c.printVoucherHelp()
 			return nil
+		case "rule":
+			c.printRuleHelp()
+			return nil
 		case "report":
 			c.printReportHelp()
 			return nil
@@ -134,6 +139,8 @@ func (c *CLI) Run() error {
 		return c.runJournal()
 	case "voucher":
 		return c.runVoucher()
+	case "rule":
+		return c.runRule()
 	case "report":
 		return c.runReport()
 	case "sourcedocument":
@@ -271,6 +278,20 @@ func (c *CLI) runVoucher() error {
 	}
 }
 
+func (c *CLI) runRule() error {
+	switch c.subcmd {
+	case "list":
+		return c.cmdRuleList()
+	case "add":
+		return c.cmdRuleAdd()
+	case "delete":
+		return c.cmdRuleDelete()
+	default:
+		c.printRuleHelp()
+		return nil
+	}
+}
+
 func (c *CLI) runReport() error {
 	switch c.subcmd {
 	case "balance":
@@ -332,6 +353,11 @@ func (c *CLI) parseFlags() {
 				c.titles = append(c.titles, c.args[i+1])
 				i++
 			}
+		case "--name", "-n":
+			if i+1 < len(c.args) && c.args[i+1][0] != '-' {
+				c.name = c.args[i+1]
+				i++
+			}
 		case "--date", "-d":
 			if i+1 < len(c.args) && c.args[i+1][0] != '-' {
 				c.date = c.args[i+1]
@@ -385,6 +411,7 @@ Commands:
   account   Account management
   journal   Journal management
   voucher   Voucher management
+  rule      Rule management
   report    Report management
   sourcedocument  Source document management
 
@@ -443,6 +470,22 @@ Options:
   --catalog, -c      Catalog (required)
   --description      Description
   --entry, -e        Entry: "account amount currency" (repeatable)`)
+}
+
+func (c *CLI) printRuleHelp() {
+	fmt.Println(`Usage: accounting rule <subcommand> [options]
+
+Subcommands:
+  list      List all rules
+  add       Add a rule
+  delete    Delete a rule
+  help      Show this help
+
+Options:
+  --catalog, -c     Rule catalog (optional for add, required for delete)
+  --name, -n        Rule name
+  --description     Rule description
+  --spec            Rule JSON file path`)
 }
 
 func (c *CLI) printReportHelp() {
@@ -630,6 +673,83 @@ func (c *CLI) cmdVoucherAdd() error {
 		return err
 	}
 	fmt.Printf("Voucher added: %s %s (%d entries)\n", date, c.catalog, len(entries))
+	return nil
+}
+
+func (c *CLI) cmdRuleList() error {
+	return c.accounting(false, func(bk *book.Book, acc *accountant.Accountant) error {
+		var rules []*rule.Rule
+		for _, r := range bk.Rules {
+			if c.catalog != "" && r.Catalog != c.catalog {
+				continue
+			}
+			rules = append(rules, r)
+		}
+
+		if len(rules) == 0 {
+			fmt.Println("No rules")
+			return nil
+		}
+
+		sort.Slice(rules, func(i, j int) bool {
+			return rules[i].Catalog < rules[j].Catalog
+		})
+
+		fmt.Println("Rules:")
+		for _, r := range rules {
+			fmt.Printf("  %s  %s\n", r.Catalog, r.Name)
+		}
+		return nil
+	})
+}
+
+func (c *CLI) cmdRuleAdd() error {
+	if c.spec == "" {
+		return fmt.Errorf("--spec is required")
+	}
+
+	ru := &rule.Rule{}
+	b, err := os.ReadFile(c.spec)
+	if err != nil {
+		return err
+	}
+	if err := json.Unmarshal(b, ru); err != nil {
+		return err
+	}
+	if c.catalog != "" {
+		ru.Catalog = c.catalog
+	}
+	if ru.Catalog == "" {
+		return fmt.Errorf("--catalog is required (or provide catalog in --spec)")
+	}
+	if c.name != "" {
+		ru.Name = c.name
+	}
+	if c.description != "" {
+		ru.Description = c.description
+	}
+
+	err = c.accounting(true, func(bk *book.Book, acc *accountant.Accountant) error {
+		return acc.AddRule(ru)
+	})
+	if err != nil {
+		return err
+	}
+	fmt.Printf("Rule added: %s (Name: %s)\n", ru.Catalog, ru.Name)
+	return nil
+}
+
+func (c *CLI) cmdRuleDelete() error {
+	if c.catalog == "" {
+		return fmt.Errorf("--catalog is required")
+	}
+	err := c.accounting(true, func(bk *book.Book, acc *accountant.Accountant) error {
+		return acc.DelRule(c.catalog)
+	})
+	if err != nil {
+		return err
+	}
+	fmt.Printf("Rule deleted: %s\n", c.catalog)
 	return nil
 }
 

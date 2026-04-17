@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -14,12 +15,14 @@ import (
 	"github.com/chamzzzzzz/accounting/account"
 	"github.com/chamzzzzzz/accounting/book"
 	"github.com/chamzzzzzz/accounting/journal"
+	"github.com/chamzzzzzz/accounting/rule"
 	"github.com/chamzzzzzz/accounting/voucher"
 )
 
 type (
 	Account = account.Account
 	Journal = journal.Journal
+	Rule    = rule.Rule
 	Info    = book.Info
 	Book    = book.Book
 )
@@ -48,12 +51,17 @@ func (p *Provider) Load(ctx context.Context, id string) (*Book, error) {
 	if err != nil {
 		return nil, err
 	}
+	rules, err := readRules(path)
+	if err != nil {
+		return nil, err
+	}
 
 	book := &Book{
 		Id:       id,
 		Info:     info,
 		Accounts: accounts,
 		Journals: journals,
+		Rules:    rules,
 	}
 	return book, nil
 }
@@ -73,6 +81,9 @@ func (p *Provider) Save(ctx context.Context, book *Book) error {
 	if err := checkAccounts(accounts); err != nil {
 		return err
 	}
+	if err := checkRules(book.Rules); err != nil {
+		return err
+	}
 
 	if err := writeInfo(path, info); err != nil {
 		return err
@@ -81,6 +92,9 @@ func (p *Provider) Save(ctx context.Context, book *Book) error {
 		return err
 	}
 	if err := writeJournals(path, book.Journals); err != nil {
+		return err
+	}
+	if err := writeRules(path, book.Rules); err != nil {
 		return err
 	}
 	return nil
@@ -244,6 +258,91 @@ func writeJournals(path string, journals []*Journal) error {
 		name := filepath.Join(root, year, month, journal.Catalog)
 		if err := write(name, journal); err != nil {
 			return err
+		}
+	}
+	return nil
+}
+
+func readRules(path string) ([]*Rule, error) {
+	root := filepath.Join(path, "RULE")
+	fi, err := os.Stat(root)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	if !fi.IsDir() {
+		return nil, errors.New("RULE is not a directory")
+	}
+
+	var rules []*Rule
+	if err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			return nil
+		}
+		r := &Rule{}
+		if err := read(path, r); err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		r.Catalog = filepath.ToSlash(rel)
+		rules = append(rules, r)
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+	if err := checkRules(rules); err != nil {
+		return nil, err
+	}
+	return rules, nil
+}
+
+func writeRules(path string, rules []*Rule) error {
+	root := filepath.Join(path, "RULE")
+	if err := os.RemoveAll(root); err != nil {
+		return err
+	}
+	if err := os.MkdirAll(root, 0755); err != nil {
+		return err
+	}
+	if err := checkRules(rules); err != nil {
+		return err
+	}
+	for _, rule := range rules {
+		name := filepath.Join(root, filepath.FromSlash(rule.Catalog))
+		if err := write(name, rule); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func checkRules(rules []*Rule) error {
+	seen := make(map[string]bool)
+	for _, rule := range rules {
+		if rule.Catalog == "" {
+			return errors.New("no rule catalog")
+		}
+		if seen[rule.Catalog] {
+			return fmt.Errorf("rule catalog conflict: %s", rule.Catalog)
+		}
+		seen[rule.Catalog] = true
+	}
+	for c1 := range seen {
+		for c2 := range seen {
+			if c1 == c2 {
+				continue
+			}
+			if strings.HasPrefix(c1, c2+"/") || strings.HasPrefix(c2, c1+"/") {
+				return fmt.Errorf("rule catalog conflict: %s and %s", c1, c2)
+			}
 		}
 	}
 	return nil

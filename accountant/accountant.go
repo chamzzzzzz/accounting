@@ -13,6 +13,7 @@ import (
 	"github.com/chamzzzzzz/accounting/book"
 	"github.com/chamzzzzzz/accounting/journal"
 	"github.com/chamzzzzzz/accounting/report"
+	"github.com/chamzzzzzz/accounting/rule"
 	"github.com/chamzzzzzz/accounting/sourcedocument/processor"
 	"github.com/chamzzzzzz/accounting/sourcedocument/scanner"
 	"github.com/chamzzzzzz/accounting/voucher"
@@ -20,6 +21,7 @@ import (
 
 type (
 	Account               = account.Account
+	Rule                  = rule.Rule
 	Voucher               = voucher.Voucher
 	Journal               = journal.Journal
 	ReportParameters      = report.ReportParameters
@@ -92,6 +94,54 @@ func (a *Accountant) GetAccount(title string) (*Account, error) {
 	for _, acc := range a.Book.Accounts {
 		if acc.Title == title {
 			return acc, nil
+		}
+	}
+	return nil, nil
+}
+
+func (a *Accountant) AddRule(rule *Rule) error {
+	if a.Book == nil {
+		return ErrNoBook
+	}
+	if rule == nil {
+		return errors.New("no rule")
+	}
+	if rule.Catalog == "" {
+		return errors.New("no rule catalog")
+	}
+	if r, _ := a.GetRule(rule.Catalog); r != nil {
+		return errors.New("rule exists: " + rule.Catalog)
+	}
+	a.Book.Rules = append(a.Book.Rules, rule)
+	return nil
+}
+
+func (a *Accountant) DelRule(catalog string) error {
+	if a.Book == nil {
+		return ErrNoBook
+	}
+	if catalog == "" {
+		return errors.New("no rule catalog")
+	}
+	for i, rule := range a.Book.Rules {
+		if rule.Catalog == catalog {
+			a.Book.Rules = append(a.Book.Rules[:i], a.Book.Rules[i+1:]...)
+			return nil
+		}
+	}
+	return nil
+}
+
+func (a *Accountant) GetRule(catalog string) (*Rule, error) {
+	if a.Book == nil {
+		return nil, ErrNoBook
+	}
+	if catalog == "" {
+		return nil, errors.New("no rule catalog")
+	}
+	for _, rule := range a.Book.Rules {
+		if rule.Catalog == catalog {
+			return rule, nil
 		}
 	}
 	return nil, nil
