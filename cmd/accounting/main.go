@@ -39,6 +39,8 @@ import (
 type option struct {
 	args        []string
 	dir         string
+	to          string
+	from        string
 	format      string
 	cmd         string
 	subcmd      string
@@ -420,6 +422,16 @@ func (c *CLI) parseFlags() {
 				c.option.strategy = c.args[i+1]
 				i++
 			}
+		case "--to":
+			if i+1 < len(c.args) && c.args[i+1][0] != '-' {
+				c.to = c.args[i+1]
+				i++
+			}
+		case "--from":
+			if i+1 < len(c.args) && c.args[i+1][0] != '-' {
+				c.from = c.args[i+1]
+				i++
+			}
 		case "--label":
 			if i+1 < len(c.args) && c.args[i+1][0] != '-' {
 				c.labels = append(c.labels, c.args[i+1])
@@ -504,7 +516,8 @@ Options:
   --catalog, -c      Catalog (required)
   --description      Description
   --entry, -e        Entry: "account amount currency" (repeatable)
-  --spec             Source document JSON file path (required for prepare)
+  --from             Source document or voucher file path
+  --to               Voucher output directory
   --strategy         Voucher prepare strategy (default: basic)`)
 }
 
@@ -521,7 +534,7 @@ Options:
   --catalog, -c     Rule catalog (optional for add, required for delete)
   --name, -n        Rule name
   --description     Rule description
-  --spec            Rule JSON file path`)
+  --from            Rule file path`)
 }
 
 func (c *CLI) printReportHelp() {
@@ -696,58 +709,56 @@ func (c *CLI) cmdJournalDelete() error {
 }
 
 func (c *CLI) cmdVoucherAdd() error {
-	if c.date == "" {
-		return fmt.Errorf("--date is required")
-	}
-	if c.catalog == "" {
-		return fmt.Errorf("--catalog is required")
-	}
-	date, err := parseDate(c.date, time.RFC3339)
-	if err != nil {
-		return err
-	}
-	entries, err := parseEntries(c.entries)
-	if err != nil {
-		return err
-	}
-	if len(entries) == 0 {
-		return fmt.Errorf("at least one --entry is required")
-	}
-	err = c.accounting(true, func(bk *book.Book, acc *accountant.Accountant) error {
-		return acc.AddVoucher(&voucher.Voucher{
+	var vouchers []*voucher.Voucher
+
+	if c.from != "" {
+		paths, err := walk(c.from)
+		if err != nil {
+			return err
+		}
+
+		for _, path := range paths {
+			b, err := os.ReadFile(path)
+			if err != nil {
+				return err
+			}
+			v := &voucher.Voucher{}
+			if err := json.Unmarshal(b, v); err != nil {
+				return fmt.Errorf("load voucher %s: %w", path, err)
+			}
+			vouchers = append(vouchers, v)
+		}
+	} else {
+		if c.date == "" {
+			return fmt.Errorf("--date is required")
+		}
+		if c.catalog == "" {
+			return fmt.Errorf("--catalog is required")
+		}
+		date, err := parseDate(c.date, time.RFC3339)
+		if err != nil {
+			return err
+		}
+		entries, err := parseEntries(c.entries)
+		if err != nil {
+			return err
+		}
+		if len(entries) == 0 {
+			return fmt.Errorf("at least one --entry is required")
+		}
+		vouchers = append(vouchers, &voucher.Voucher{
 			Date:        date,
 			Catalog:     c.catalog,
 			Entries:     entries,
 			Description: c.description,
 		})
-	})
-	if err != nil {
-		return err
-	}
-	fmt.Printf("Voucher added: %s %s (%d entries)\n", date, c.catalog, len(entries))
-	return nil
-}
-
-func (c *CLI) cmdVoucherPrepare() error {
-	if c.spec == "" {
-		return fmt.Errorf("--spec is required")
 	}
 
-	b, err := os.ReadFile(c.spec)
-	if err != nil {
-		return err
-	}
-
-	var sd sourcedocument.SourceDocument
-	if err := json.Unmarshal(b, &sd); err != nil {
-		return err
-	}
-
-	var vouchers []*voucher.Voucher
-	err = c.accounting(false, func(bk *book.Book, acc *accountant.Accountant) error {
-		vouchers, err = acc.PrepareVoucher(context.Background(), &sd)
-		if err != nil {
-			return err
+	err := c.accounting(true, func(bk *book.Book, acc *accountant.Accountant) error {
+		for _, v := range vouchers {
+			if err := acc.AddVoucher(v); err != nil {
+				return err
+			}
 		}
 		return nil
 	})
@@ -755,9 +766,81 @@ func (c *CLI) cmdVoucherPrepare() error {
 		return err
 	}
 
-	encoder := json.NewEncoder(os.Stdout)
-	encoder.SetIndent("", "  ")
-	return encoder.Encode(vouchers)
+	for _, v := range vouchers {
+		fmt.Printf("Voucher added: %s %s %s (%d entries)\n", v.Id, v.Date, v.Catalog, len(v.Entries))
+	}
+	return nil
+}
+
+func (c *CLI) cmdVoucherPrepare() error {
+	if c.from == "" {
+		return fmt.Errorf("--from is required")
+	}
+
+	paths, err := walk(c.from)
+	if err != nil {
+		return err
+	}
+
+	if c.to != "" {
+		if err := os.MkdirAll(c.to, 0755); err != nil {
+			return err
+		}
+	}
+
+	for _, path := range paths {
+		b, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+
+		var sd sourcedocument.SourceDocument
+		if err := json.Unmarshal(b, &sd); err != nil {
+			return fmt.Errorf("load source document %s: %w", path, err)
+		}
+
+		var vouchers []*voucher.Voucher
+		err = c.accounting(false, func(bk *book.Book, acc *accountant.Accountant) error {
+			vouchers, err = acc.PrepareVoucher(context.Background(), &sd)
+			if err != nil {
+				return err
+			}
+			return nil
+		})
+		if err != nil {
+			return err
+		}
+
+		if c.to != "" {
+			multiple := len(vouchers) > 1
+			for i, v := range vouchers {
+				name := strings.TrimSpace(v.Id)
+				if name == "" {
+					name = time.Now().Format("20060102150405")
+				}
+				if multiple {
+					name = fmt.Sprintf("%s.%d", name, i+1)
+				}
+				path := filepath.Join(c.to, name)
+				b, err := json.MarshalIndent(v, "", "  ")
+				if err != nil {
+					return err
+				}
+				b = append(b, '\n')
+				if err := os.WriteFile(path, b, 0644); err != nil {
+					return err
+				}
+			}
+			continue
+		} else {
+			encoder := json.NewEncoder(os.Stdout)
+			encoder.SetIndent("", "  ")
+			if err := encoder.Encode(vouchers); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 func (c *CLI) cmdRuleList() error {
@@ -788,38 +871,55 @@ func (c *CLI) cmdRuleList() error {
 }
 
 func (c *CLI) cmdRuleAdd() error {
-	if c.spec == "" {
-		return fmt.Errorf("--spec is required")
+	if c.from == "" {
+		return fmt.Errorf("--from is required")
 	}
 
-	ru := &rule.Rule{}
-	b, err := os.ReadFile(c.spec)
+	paths, err := walk(c.from)
 	if err != nil {
 		return err
 	}
-	if err := json.Unmarshal(b, ru); err != nil {
-		return err
-	}
-	if c.catalog != "" {
-		ru.Catalog = c.catalog
-	}
-	if ru.Catalog == "" {
-		return fmt.Errorf("--catalog is required (or provide catalog in --spec)")
-	}
-	if c.name != "" {
-		ru.Name = c.name
-	}
-	if c.description != "" {
-		ru.Description = c.description
+
+	var rules []*rule.Rule
+	for _, path := range paths {
+		rule := &rule.Rule{}
+		b, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		if err := json.Unmarshal(b, rule); err != nil {
+			return fmt.Errorf("load rule %s: %w", path, err)
+		}
+		if rule.Catalog == "" {
+			rule.Catalog = c.catalog
+		}
+		if rule.Catalog == "" {
+			return fmt.Errorf("--catalog is required (or provide catalog in %s)", path)
+		}
+		if rule.Name == "" {
+			rule.Name = c.name
+		}
+		if rule.Description == "" {
+			rule.Description = c.description
+		}
+		rules = append(rules, rule)
 	}
 
 	err = c.accounting(true, func(bk *book.Book, acc *accountant.Accountant) error {
-		return acc.AddRule(ru)
+		for _, rule := range rules {
+			if err := acc.AddRule(rule); err != nil {
+				return err
+			}
+		}
+		return nil
 	})
 	if err != nil {
 		return err
 	}
-	fmt.Printf("Rule added: %s (Name: %s)\n", ru.Catalog, ru.Name)
+
+	for _, rule := range rules {
+		fmt.Printf("Rule added: %s (Name: %s)\n", rule.Catalog, rule.Name)
+	}
 	return nil
 }
 
@@ -835,6 +935,27 @@ func (c *CLI) cmdRuleDelete() error {
 	}
 	fmt.Printf("Rule deleted: %s\n", c.catalog)
 	return nil
+}
+
+func walk(name string) ([]string, error) {
+	if strings.HasSuffix(name, "/") {
+		var paths []string
+		err := filepath.Walk(name, func(path string, info os.FileInfo, err error) error {
+			if err != nil {
+				return err
+			}
+			if info.IsDir() {
+				return nil
+			}
+			paths = append(paths, path)
+			return nil
+		})
+		if err != nil {
+			return nil, err
+		}
+		return paths, nil
+	}
+	return []string{name}, nil
 }
 
 const (
