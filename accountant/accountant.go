@@ -1,6 +1,7 @@
 package accountant
 
 import (
+	"context"
 	"errors"
 	"math"
 	"sort"
@@ -14,8 +15,10 @@ import (
 	"github.com/chamzzzzzz/accounting/journal"
 	"github.com/chamzzzzzz/accounting/report"
 	"github.com/chamzzzzzz/accounting/rule"
+	"github.com/chamzzzzzz/accounting/sourcedocument"
 	"github.com/chamzzzzzz/accounting/sourcedocument/processor"
 	"github.com/chamzzzzzz/accounting/sourcedocument/scanner"
+	"github.com/chamzzzzzz/accounting/strategy"
 	"github.com/chamzzzzzz/accounting/voucher"
 )
 
@@ -37,6 +40,7 @@ var (
 type Accountant struct {
 	Scanners   []scanner.Scanner
 	Processors []processor.Processor
+	Strategy   strategy.Strategy
 	Book       *book.Book
 }
 
@@ -230,6 +234,21 @@ func (a *Accountant) AddVoucher(voucher *Voucher) error {
 	}
 	j.Vouchers = append(j.Vouchers, voucher)
 	return nil
+}
+
+func (a *Accountant) PrepareVoucher(ctx context.Context, source *sourcedocument.SourceDocument) ([]*Voucher, error) {
+	if a.Book == nil {
+		return nil, ErrNoBook
+	}
+	if source == nil {
+		return nil, errors.New("no source document")
+	}
+
+	if a.Strategy == nil {
+		return nil, errors.New("no strategy")
+	}
+
+	return a.Strategy.PrepareVoucher(ctx, a.Book, source)
 }
 
 func (a *Accountant) ReportAccountBalance(parameters *ReportParameters) (*AccountBalanceReport, error) {

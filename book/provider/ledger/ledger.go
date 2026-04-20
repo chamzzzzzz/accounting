@@ -161,9 +161,25 @@ func readAccounts(path string) ([]*Account, error) {
 			return err
 		}
 		catalog := strings.TrimSuffix(filepath.ToSlash(rel), ".ledger")
+		var current *Account
 		for _, line := range strings.Split(string(b), "\n") {
-			title, ok := strings.CutPrefix(strings.TrimSpace(line), "account ")
+			trimmed := strings.TrimSpace(line)
+
+			title, ok := strings.CutPrefix(trimmed, "account ")
 			if !ok {
+				if current == nil {
+					continue
+				}
+
+				labelLine, hasLabel := strings.CutPrefix(trimmed, ";label:")
+				if !hasLabel {
+					continue
+				}
+
+				words := strings.Fields(labelLine)
+				if len(words) > 0 {
+					current.Labels = append(current.Labels, &account.Label{Words: words})
+				}
 				continue
 			}
 
@@ -172,7 +188,8 @@ func readAccounts(path string) ([]*Account, error) {
 				continue
 			}
 
-			accounts = append(accounts, &Account{Catalog: catalog, Title: title})
+			current = &Account{Catalog: catalog, Title: title}
+			accounts = append(accounts, current)
 		}
 		return nil
 	}); err != nil {
@@ -203,6 +220,12 @@ func writeAccounts(path string, accounts []*Account) error {
 		var sb strings.Builder
 		for _, account := range accounts {
 			fmt.Fprintf(&sb, "account %s\n", account.Title)
+			for _, label := range account.Labels {
+				if label == nil || len(label.Words) == 0 {
+					continue
+				}
+				fmt.Fprintf(&sb, "  ;label: %s\n", strings.Join(label.Words, " "))
+			}
 		}
 		if err := os.WriteFile(name, []byte(sb.String()), 0644); err != nil {
 			return err

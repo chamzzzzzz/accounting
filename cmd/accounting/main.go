@@ -23,21 +23,23 @@ import (
 	"github.com/chamzzzzzz/accounting/journal"
 	"github.com/chamzzzzzz/accounting/report"
 	"github.com/chamzzzzzz/accounting/rule"
+	"github.com/chamzzzzzz/accounting/sourcedocument"
 	"github.com/chamzzzzzz/accounting/sourcedocument/scanner"
 	"github.com/chamzzzzzz/accounting/sourcedocument/scanner/ai"
 	"github.com/chamzzzzzz/accounting/sourcedocument/scanner/ai/openai"
 	"github.com/chamzzzzzz/accounting/sourcedocument/scanner/ocr"
 	"github.com/chamzzzzzz/accounting/sourcedocument/scanner/ocr/normalizer"
+	"github.com/chamzzzzzz/accounting/strategy"
+	"github.com/chamzzzzzz/accounting/strategy/basic"
 	"github.com/chamzzzzzz/accounting/voucher"
 	"github.com/chamzzzzzz/gocr"
 	"github.com/chamzzzzzz/gocr/macocr"
 )
 
-type CLI struct {
+type option struct {
 	args        []string
 	dir         string
 	format      string
-	provider    book.Provider
 	cmd         string
 	subcmd      string
 	titles      []string
@@ -49,13 +51,24 @@ type CLI struct {
 	document    string
 	spec        string
 	scanner     string
+	labels      []string
+	strategy    string
+}
+
+type CLI struct {
+	option
+	provider book.Provider
+	strategy strategy.Strategy
 }
 
 func main() {
 	cli := &CLI{
-		args:   os.Args[1:],
-		dir:    ".",
-		format: "ssfs",
+		option: option{
+			args:     os.Args[1:],
+			dir:      ".",
+			format:   "ssfs",
+			strategy: "basic",
+		},
 	}
 	if err := cli.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
@@ -128,6 +141,13 @@ func (c *CLI) Run() error {
 		c.provider = &ledger.Provider{Dir: c.dir}
 	default:
 		return fmt.Errorf("unknown provider: %s", c.format)
+	}
+
+	switch c.option.strategy {
+	case "basic":
+		c.strategy = &basic.Strategy{}
+	default:
+		return fmt.Errorf("unknown strategy: %s", c.option.strategy)
 	}
 
 	switch c.cmd {
@@ -272,6 +292,8 @@ func (c *CLI) runVoucher() error {
 	switch c.subcmd {
 	case "add":
 		return c.cmdVoucherAdd()
+	case "prepare":
+		return c.cmdVoucherPrepare()
 	default:
 		c.printVoucherHelp()
 		return nil
@@ -320,7 +342,7 @@ func (c *CLI) accounting(save bool, fn func(bk *book.Book, acc *accountant.Accou
 	if err != nil {
 		return err
 	}
-	acc := &accountant.Accountant{Book: bk}
+	acc := &accountant.Accountant{Book: bk, Strategy: c.strategy}
 	if err := fn(bk, acc); err != nil {
 		return err
 	}
@@ -393,6 +415,16 @@ func (c *CLI) parseFlags() {
 				c.scanner = c.args[i+1]
 				i++
 			}
+		case "--strategy":
+			if i+1 < len(c.args) && c.args[i+1][0] != '-' {
+				c.option.strategy = c.args[i+1]
+				i++
+			}
+		case "--label":
+			if i+1 < len(c.args) && c.args[i+1][0] != '-' {
+				c.labels = append(c.labels, c.args[i+1])
+				i++
+			}
 		default:
 			args = append(args, c.args[i])
 		}
@@ -441,7 +473,8 @@ Subcommands:
 
 Options:
   --title, -t    Account title (required)
-  --catalog, -c  Account catalog (required)`)
+  --catalog, -c  Account catalog (required)
+  --label        Account label, space-separated-words (repeatable)`)
 }
 
 func (c *CLI) printJournalHelp() {
@@ -463,13 +496,16 @@ func (c *CLI) printVoucherHelp() {
 
 Subcommands:
   add       Add a voucher
+  prepare   Prepare vouchers
   help      Show this help
 
 Options:
   --date, -d         Date (RFC3339, required)
   --catalog, -c      Catalog (required)
   --description      Description
-  --entry, -e        Entry: "account amount currency" (repeatable)`)
+  --entry, -e        Entry: "account amount currency" (repeatable)
+  --spec             Source document JSON file path (required for prepare)
+  --strategy         Voucher prepare strategy (default: basic)`)
 }
 
 func (c *CLI) printRuleHelp() {
@@ -549,9 +585,10 @@ func (c *CLI) cmdAccountAdd() error {
 	if c.catalog == "" {
 		return fmt.Errorf("--catalog is required")
 	}
+	labels := parseLabels(c.labels)
 	err := c.accounting(true, func(bk *book.Book, acc *accountant.Accountant) error {
 		for _, title := range c.titles {
-			if err := acc.AddAccount(&account.Account{Title: title, Catalog: c.catalog}); err != nil {
+			if err := acc.AddAccount(&account.Account{Title: title, Catalog: c.catalog, Labels: labels}); err != nil {
 				return err
 			}
 		}
@@ -564,6 +601,21 @@ func (c *CLI) cmdAccountAdd() error {
 		fmt.Printf("Account added: %s (Catalog: %s)\n", title, c.catalog)
 	}
 	return nil
+}
+
+func parseLabels(ss []string) []*account.Label {
+	var labels []*account.Label
+	for _, s := range ss {
+		s = strings.TrimSpace(s)
+		if s == "" {
+			continue
+		}
+		words := strings.Fields(s)
+		if len(words) > 0 {
+			labels = append(labels, &account.Label{Words: words})
+		}
+	}
+	return labels
 }
 
 func (c *CLI) cmdAccountDelete() error {
@@ -674,6 +726,38 @@ func (c *CLI) cmdVoucherAdd() error {
 	}
 	fmt.Printf("Voucher added: %s %s (%d entries)\n", date, c.catalog, len(entries))
 	return nil
+}
+
+func (c *CLI) cmdVoucherPrepare() error {
+	if c.spec == "" {
+		return fmt.Errorf("--spec is required")
+	}
+
+	b, err := os.ReadFile(c.spec)
+	if err != nil {
+		return err
+	}
+
+	var sd sourcedocument.SourceDocument
+	if err := json.Unmarshal(b, &sd); err != nil {
+		return err
+	}
+
+	var vouchers []*voucher.Voucher
+	err = c.accounting(false, func(bk *book.Book, acc *accountant.Accountant) error {
+		vouchers, err = acc.PrepareVoucher(context.Background(), &sd)
+		if err != nil {
+			return err
+		}
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+
+	encoder := json.NewEncoder(os.Stdout)
+	encoder.SetIndent("", "  ")
+	return encoder.Encode(vouchers)
 }
 
 func (c *CLI) cmdRuleList() error {
