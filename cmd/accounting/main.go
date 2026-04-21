@@ -51,7 +51,6 @@ type option struct {
 	catalog     string
 	description string
 	entries     []string
-	document    string
 	spec        string
 	scanner     string
 	labels      []string
@@ -187,8 +186,13 @@ func (c *CLI) runSourceDocument() error {
 }
 
 func (c *CLI) cmdSourceDocumentScan() error {
-	if c.document == "" {
-		return fmt.Errorf("document is required")
+	if c.from == "" {
+		return fmt.Errorf("--from is required")
+	}
+
+	paths, err := walk(c.from)
+	if err != nil {
+		return err
 	}
 
 	s, err := c.createScanner()
@@ -196,15 +200,46 @@ func (c *CLI) cmdSourceDocumentScan() error {
 		return err
 	}
 
-	doc := &scanner.Document{Path: c.document}
-	sd, err := s.Scan(context.Background(), doc)
-	if err != nil {
-		return err
+	if c.to != "" {
+		if err := os.MkdirAll(c.to, 0755); err != nil {
+			return err
+		}
 	}
 
-	encoder := json.NewEncoder(os.Stdout)
-	encoder.SetIndent("", "  ")
-	return encoder.Encode(sd)
+	for _, path := range paths {
+		doc := &scanner.Document{Path: path}
+		sd, err := s.Scan(context.Background(), doc)
+		if err != nil {
+			return err
+		}
+
+		if c.to != "" {
+			rel, err := filepath.Rel(c.from, path)
+			if err != nil {
+				rel = filepath.Base(path)
+			}
+			name := strings.TrimSuffix(rel, filepath.Ext(rel)) + ".json"
+			path := filepath.Join(c.to, name)
+			if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+				return err
+			}
+			b, err := json.MarshalIndent(sd, "", "  ")
+			if err != nil {
+				return err
+			}
+			b = append(b, '\n')
+			if err := os.WriteFile(path, b, 0644); err != nil {
+				return err
+			}
+		} else {
+			encoder := json.NewEncoder(os.Stdout)
+			encoder.SetIndent("", "  ")
+			if err := encoder.Encode(sd); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 func (c *CLI) createScanner() (scanner.Scanner, error) {
@@ -417,12 +452,6 @@ func (c *CLI) parseFlags() {
 				i++
 			}
 			continue
-		case "--document":
-			if i+1 < len(c.args) && c.args[i+1][0] != '-' {
-				c.document = c.args[i+1]
-				i++
-			}
-			continue
 		case "--spec":
 			if i+1 < len(c.args) && c.args[i+1][0] != '-' {
 				c.spec = c.args[i+1]
@@ -579,7 +608,8 @@ Subcommands:
   help      Show this help
 
 Options:
-  --document  Path to the document (required)
+  --from      Path to the document or directory (required)
+  --to        Path to the source document output directory (optional)
   --spec      Path to the scanner spec file (optional)
   --scanner   Scanner type (openai, ocr, default: ocr)`)
 }
