@@ -480,7 +480,7 @@ func readJournalFile(path string) (*Journal, error) {
 
 			comment := strings.TrimSpace(trimmed[1:])
 			if after, ok := strings.CutPrefix(comment, "date:"); ok {
-				if t, err := time.Parse(time.RFC3339, strings.TrimSpace(after)); err == nil {
+				if t, err := time.ParseInLocation(time.RFC3339, strings.TrimSpace(after), time.Local); err == nil {
 					current.Date = t.Format(time.RFC3339)
 					continue
 				}
@@ -544,7 +544,7 @@ func readJournalFile(path string) (*Journal, error) {
 			}
 
 			parts := strings.SplitN(header, " ", 2)
-			t, err := time.Parse("2006/01/02", parts[0])
+			t, err := time.ParseInLocation("2006/01/02", parts[0], time.Local)
 			if err != nil {
 				return nil, fmt.Errorf("line %d: invalid date: %s", i+1, parts[0])
 			}
@@ -557,7 +557,7 @@ func readJournalFile(path string) (*Journal, error) {
 				continue
 			}
 			if after, ok := strings.CutPrefix(comment, "date:"); ok {
-				if t, err := time.Parse(time.RFC3339, strings.TrimSpace(after)); err == nil {
+				if t, err := time.ParseInLocation(time.RFC3339, strings.TrimSpace(after), time.Local); err == nil {
 					current.Date = t.Format(time.RFC3339)
 					continue
 				}
@@ -587,9 +587,9 @@ func writeJournalFile(path string, journal *Journal) error {
 			sb.WriteString("\n")
 		}
 
-		t, _ := time.Parse(time.RFC3339, voucher.Date)
+		t, _ := time.ParseInLocation(time.RFC3339, voucher.Date, time.Local)
 		if t.IsZero() {
-			t, _ = time.Parse("2006-01-02", voucher.Date)
+			t, _ = time.ParseInLocation("2006-01-02", voucher.Date, time.Local)
 		}
 		if voucher.Description != "" {
 			fmt.Fprintf(&sb, "%s %s\n", t.Format("2006/01/02"), voucher.Description)

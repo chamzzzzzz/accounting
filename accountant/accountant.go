@@ -470,7 +470,7 @@ func (a *Accountant) ReportAccountRegister(parameters *ReportParameters) (*Accou
 		for _, v := range j.Vouchers {
 			t, err := time.ParseInLocation(time.RFC3339, v.Date, time.Local)
 			if err != nil {
-				t, _ = time.Parse("2006-01-02", v.Date)
+				t, _ = time.ParseInLocation("2006-01-02", v.Date, time.Local)
 			}
 			allVouchers = append(allVouchers, voucherWithDate{v: v, date: t})
 		}

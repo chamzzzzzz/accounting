@@ -1252,7 +1252,7 @@ func (c *CLI) printAccountRegisterReport(r *report.AccountRegisterReport) {
 	for _, reg := range r.Register {
 		t, err := time.ParseInLocation(time.RFC3339, reg.Voucher.Date, time.Local)
 		if err != nil {
-			t, _ = time.Parse("2006-01-02", reg.Voucher.Date)
+			t, _ = time.ParseInLocation("2006-01-02", reg.Voucher.Date, time.Local)
 		}
 		dateStr := t.Format("2006-01-02 15:04")
 		desc := reg.Voucher.Description
@@ -1311,7 +1311,7 @@ func (c *CLI) printAccountRegisterReport(r *report.AccountRegisterReport) {
 }
 
 func parseDate(s, layout string) (string, error) {
-	t, err := time.Parse(layout, s)
+	t, err := time.ParseInLocation(layout, s, time.Local)
 	if err != nil {
 		return "", fmt.Errorf("invalid date format (expected %s): %v", layout, err)
 	}
