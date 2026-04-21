@@ -47,6 +47,7 @@ type option struct {
 	titles      []string
 	name        string
 	date        string
+	id          string
 	catalog     string
 	description string
 	entries     []string
@@ -367,71 +368,91 @@ func (c *CLI) parseFlags() {
 				c.dir = c.args[i+1]
 				i++
 			}
+			continue
 		case "--format", "-f":
 			if i+1 < len(c.args) && c.args[i+1][0] != '-' {
 				c.format = c.args[i+1]
 				i++
 			}
+			continue
 		case "--title", "-t":
 			if i+1 < len(c.args) && c.args[i+1][0] != '-' {
 				c.titles = append(c.titles, c.args[i+1])
 				i++
 			}
+			continue
 		case "--name", "-n":
 			if i+1 < len(c.args) && c.args[i+1][0] != '-' {
 				c.name = c.args[i+1]
 				i++
 			}
+			continue
 		case "--date", "-d":
 			if i+1 < len(c.args) && c.args[i+1][0] != '-' {
 				c.date = c.args[i+1]
 				i++
 			}
+			continue
+		case "--id":
+			if i+1 < len(c.args) && c.args[i+1][0] != '-' {
+				c.id = c.args[i+1]
+				i++
+			}
+			continue
 		case "--catalog", "-c":
 			if i+1 < len(c.args) && c.args[i+1][0] != '-' {
 				c.catalog = c.args[i+1]
 				i++
 			}
+			continue
 		case "--description":
 			if i+1 < len(c.args) && c.args[i+1][0] != '-' {
 				c.description = c.args[i+1]
 				i++
 			}
+			continue
 		case "--entry", "-e":
 			if i+1 < len(c.args) && c.args[i+1][0] != '-' {
 				c.entries = append(c.entries, c.args[i+1])
 				i++
 			}
+			continue
 		case "--document":
 			if i+1 < len(c.args) && c.args[i+1][0] != '-' {
 				c.document = c.args[i+1]
 				i++
 			}
+			continue
 		case "--spec":
 			if i+1 < len(c.args) && c.args[i+1][0] != '-' {
 				c.spec = c.args[i+1]
 				i++
 			}
+			continue
 		case "--scanner":
 			if i+1 < len(c.args) && c.args[i+1][0] != '-' {
 				c.scanner = c.args[i+1]
 				i++
 			}
+			continue
 		case "--strategy":
 			if i+1 < len(c.args) && c.args[i+1][0] != '-' {
 				c.option.strategy = c.args[i+1]
 				i++
 			}
+			continue
 		case "--to":
 			if i+1 < len(c.args) && c.args[i+1][0] != '-' {
 				c.to = c.args[i+1]
 				i++
 			}
+			continue
 		case "--from":
 			if i+1 < len(c.args) && c.args[i+1][0] != '-' {
 				c.from = c.args[i+1]
 				i++
 			}
+			continue
 		case "--label":
 			if i+1 < len(c.args) && c.args[i+1][0] != '-' {
 				c.labels = append(c.labels, c.args[i+1])
@@ -512,6 +533,7 @@ Subcommands:
   help      Show this help
 
 Options:
+  --id               Voucher ID
   --date, -d         Date (RFC3339, required)
   --catalog, -c      Catalog (required)
   --description      Description
@@ -747,6 +769,7 @@ func (c *CLI) cmdVoucherAdd() error {
 			return fmt.Errorf("at least one --entry is required")
 		}
 		vouchers = append(vouchers, &voucher.Voucher{
+			Id:          c.id,
 			Date:        date,
 			Catalog:     c.catalog,
 			Entries:     entries,
@@ -767,7 +790,11 @@ func (c *CLI) cmdVoucherAdd() error {
 	}
 
 	for _, v := range vouchers {
-		fmt.Printf("Voucher added: %s %s %s (%d entries)\n", v.Id, v.Date, v.Catalog, len(v.Entries))
+		id := v.Id
+		if id == "" {
+			id = "-"
+		}
+		fmt.Printf("Voucher added: %s %s %s %d entries\n", id, v.Date, v.Catalog, len(v.Entries))
 	}
 	return nil
 }

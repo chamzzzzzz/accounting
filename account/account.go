@@ -5,7 +5,8 @@ type Label struct {
 }
 
 type Account struct {
-	Catalog string   `json:"catalog,omitempty"`
-	Title   string   `json:"title,omitempty"`
-	Labels  []*Label `json:"labels,omitempty"`
+	Catalog    string            `json:"catalog,omitempty"`
+	Title      string            `json:"title,omitempty"`
+	Labels     []*Label          `json:"labels,omitempty"`
+	Attributes map[string]string `json:"attributes,omitempty"`
 }

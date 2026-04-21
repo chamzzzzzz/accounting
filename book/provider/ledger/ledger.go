@@ -166,16 +166,20 @@ func readAccounts(path string) ([]*Account, error) {
 			trimmed := strings.TrimSpace(line)
 
 			title, ok := strings.CutPrefix(trimmed, "account ")
-			if !ok {
-				if current == nil {
-					continue
+			if ok {
+				title = strings.TrimSpace(title)
+				if title != "" {
+					current = &Account{Catalog: catalog, Title: title}
+					accounts = append(accounts, current)
 				}
+				continue
+			}
 
-				labelLine, hasLabel := strings.CutPrefix(trimmed, ";label:")
-				if !hasLabel {
-					continue
-				}
+			if current == nil {
+				continue
+			}
 
+			if labelLine, hasLabel := strings.CutPrefix(trimmed, ";label:"); hasLabel {
 				words := strings.Fields(labelLine)
 				if len(words) > 0 {
 					current.Labels = append(current.Labels, &account.Label{Words: words})
@@ -183,13 +187,16 @@ func readAccounts(path string) ([]*Account, error) {
 				continue
 			}
 
-			title = strings.TrimSpace(title)
-			if title == "" {
+			if attrLine, hasAttr := strings.CutPrefix(trimmed, ";attribute:"); hasAttr {
+				parts := strings.SplitN(attrLine, "=", 2)
+				if len(parts) == 2 {
+					if current.Attributes == nil {
+						current.Attributes = make(map[string]string)
+					}
+					current.Attributes[strings.TrimSpace(parts[0])] = strings.TrimSpace(parts[1])
+				}
 				continue
 			}
-
-			current = &Account{Catalog: catalog, Title: title}
-			accounts = append(accounts, current)
 		}
 		return nil
 	}); err != nil {
@@ -225,6 +232,14 @@ func writeAccounts(path string, accounts []*Account) error {
 					continue
 				}
 				fmt.Fprintf(&sb, "  ;label: %s\n", strings.Join(label.Words, " "))
+			}
+			var keys []string
+			for k := range account.Attributes {
+				keys = append(keys, k)
+			}
+			sort.Strings(keys)
+			for _, k := range keys {
+				fmt.Fprintf(&sb, "  ;attribute: %s=%s\n", k, account.Attributes[k])
 			}
 		}
 		if err := os.WriteFile(name, []byte(sb.String()), 0644); err != nil {
@@ -470,6 +485,10 @@ func readJournalFile(path string) (*Journal, error) {
 					continue
 				}
 			}
+			if after, ok := strings.CutPrefix(comment, "id:"); ok {
+				current.Id = strings.TrimSpace(after)
+				continue
+			}
 			if current.Comment != "" {
 				current.Comment += "\n"
 			}
@@ -543,6 +562,10 @@ func readJournalFile(path string) (*Journal, error) {
 					continue
 				}
 			}
+			if after, ok := strings.CutPrefix(comment, "id:"); ok {
+				current.Id = strings.TrimSpace(after)
+				continue
+			}
 			current.Comment = comment
 		}
 	}
@@ -572,6 +595,9 @@ func writeJournalFile(path string, journal *Journal) error {
 			fmt.Fprintf(&sb, "%s %s\n", t.Format("2006/01/02"), voucher.Description)
 		} else {
 			fmt.Fprintf(&sb, "%s\n", t.Format("2006/01/02"))
+		}
+		if voucher.Id != "" {
+			fmt.Fprintf(&sb, "  ;id:%s\n", voucher.Id)
 		}
 		if !t.IsZero() && (t.Hour() != 0 || t.Minute() != 0 || t.Second() != 0) {
 			fmt.Fprintf(&sb, "  ;date:%s\n", voucher.Date)
