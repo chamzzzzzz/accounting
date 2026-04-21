@@ -215,7 +215,7 @@ func (c *CLI) cmdSourceDocumentScan() error {
 
 		if c.to != "" {
 			rel, err := filepath.Rel(c.from, path)
-			if err != nil {
+			if err != nil || rel == "." {
 				rel = filepath.Base(path)
 			}
 			name := strings.TrimSuffix(rel, filepath.Ext(rel)) + ".json"
