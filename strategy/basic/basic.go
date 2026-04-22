@@ -37,7 +37,7 @@ func (s *Strategy) PrepareVoucher(ctx context.Context, book *book.Book, sourcedo
 }
 
 func match(_ *book.Book, rule *rule.Rule, sourcedocument *sourcedocument.SourceDocument) bool {
-	for _, a := range rule.SourceDocument.Annotations {
+	for _, a := range rule.Match.Annotations {
 		if a.Label == "" && a.Text == "" {
 			continue
 		}
@@ -68,25 +68,25 @@ func prepare(book *book.Book, rule *rule.Rule, sourcedocument *sourcedocument.So
 		Amount *amount.Amount
 	}{}
 
-	from, err := findAccount(book, sourcedocument, rule.SourceDocument.From)
+	from, err := findAccount(book, sourcedocument, rule.Prepare.From)
 	if err != nil {
 		return nil, err
 	}
 	data.From = from
 
-	to, err := findAccount(book, sourcedocument, rule.SourceDocument.To)
+	to, err := findAccount(book, sourcedocument, rule.Prepare.To)
 	if err != nil {
 		return nil, err
 	}
 	data.To = to
 
-	date, err := findDate(sourcedocument, rule.SourceDocument.Date)
+	date, err := findDate(sourcedocument, rule.Prepare.Date)
 	if err != nil {
 		return nil, err
 	}
 	data.Date = date
 
-	amount, err := findAmount(sourcedocument, rule.SourceDocument.Amount)
+	amount, err := findAmount(sourcedocument, rule.Prepare.Amount)
 	if err != nil {
 		return nil, err
 	}
