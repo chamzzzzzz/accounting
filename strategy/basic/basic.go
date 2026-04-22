@@ -19,24 +19,36 @@ import (
 	"github.com/chamzzzzzz/accounting/voucher"
 )
 
+var refer = &voucher.Voucher{
+	Id:      "{{.Id}}",
+	Date:    "{{.Date}}",
+	Catalog: "{{.Catalog}}",
+	Entries: []*voucher.Entry{
+		{Account: "{{.From.Title}}", Amount: &amount.Amount{Quantity: "-{{.Amount.Quantity}}", Currency: "{{.Amount.Currency}}"}},
+		{Account: "{{.To.Title}}", Amount: &amount.Amount{Quantity: "{{.Amount.Quantity}}", Currency: "{{.Amount.Currency}}"}},
+	},
+	Description: "{{.Description}}",
+}
+
 type Strategy struct {
 }
 
 func (s *Strategy) PrepareVoucher(ctx context.Context, book *book.Book, sourcedocument *sourcedocument.SourceDocument) ([]*voucher.Voucher, error) {
-	var vouchers []*voucher.Voucher
+	var prepared []*voucher.Voucher
 	for _, rule := range book.Rules {
-		if match(book, rule, sourcedocument) {
-			voucher, err := prepare(book, rule, sourcedocument)
+		var data data
+		if match(book, rule, sourcedocument, data) {
+			vouchers, err := prepare(book, rule, sourcedocument, refer, data, 0)
 			if err != nil {
 				return nil, err
 			}
-			vouchers = append(vouchers, voucher)
+			prepared = append(prepared, vouchers...)
 		}
 	}
-	return vouchers, nil
+	return prepared, nil
 }
 
-func match(_ *book.Book, rule *rule.Rule, sourcedocument *sourcedocument.SourceDocument) bool {
+func match(_ *book.Book, rule *rule.Rule, sourcedocument *sourcedocument.SourceDocument, _ data) bool {
 	for _, a := range rule.Match.Annotations {
 		if a.Label == "" && a.Text == "" {
 			continue
@@ -59,46 +71,112 @@ func match(_ *book.Book, rule *rule.Rule, sourcedocument *sourcedocument.SourceD
 	return true
 }
 
-func prepare(book *book.Book, rule *rule.Rule, sourcedocument *sourcedocument.SourceDocument) (*voucher.Voucher, error) {
-	data := struct {
-		Id     string
-		From   *account.Account
-		To     *account.Account
-		Date   string
-		Amount *amount.Amount
-	}{}
+func prepare(book *book.Book, rule *rule.Rule, sourcedocument *sourcedocument.SourceDocument, refer *voucher.Voucher, data data, deep int) ([]*voucher.Voucher, error) {
+	if rule.Prepare != nil {
+		from, err := findAccount(book, sourcedocument, rule.Prepare.From)
+		if err != nil {
+			return nil, err
+		}
+		if from != nil {
+			data.From = from
+		}
 
-	from, err := findAccount(book, sourcedocument, rule.Prepare.From)
-	if err != nil {
-		return nil, err
+		to, err := findAccount(book, sourcedocument, rule.Prepare.To)
+		if err != nil {
+			return nil, err
+		}
+		if to != nil {
+			data.To = to
+		}
+
+		date, err := findDate(sourcedocument, rule.Prepare.Date)
+		if err != nil {
+			return nil, err
+		}
+		if date != "" {
+			data.Date = date
+		}
+
+		amount, err := findAmount(sourcedocument, rule.Prepare.Amount)
+		if err != nil {
+			return nil, err
+		}
+		if amount != nil {
+			data.Amount = amount
+		}
+
+		orderNumber, err := findOrderNumber(sourcedocument, rule.Prepare.OrderNumber)
+		if err != nil {
+			return nil, err
+		}
+		if orderNumber != "" {
+			data.OrderNumber = orderNumber
+		}
+
+		merchant, err := findMerchant(sourcedocument, rule.Prepare.Merchant)
+		if err != nil {
+			return nil, err
+		}
+		if merchant != "" {
+			data.Merchant = merchant
+		}
+
+		description, err := findDescription(sourcedocument, rule.Prepare.Description)
+		if err != nil {
+			return nil, err
+		}
+		if description != "" {
+			data.Description = description
+		}
+
+		catalog, err := findCatalog(sourcedocument, rule.Prepare.Catalog)
+		if err != nil {
+			return nil, err
+		}
+		if catalog != "" {
+			data.Catalog = catalog
+		}
 	}
-	data.From = from
 
-	to, err := findAccount(book, sourcedocument, rule.Prepare.To)
-	if err != nil {
-		return nil, err
+	if data.Date != "" {
+		id, err := generateId(data.Date)
+		if err != nil {
+			return nil, err
+		}
+		data.Id = id
 	}
-	data.To = to
 
-	date, err := findDate(sourcedocument, rule.Prepare.Date)
-	if err != nil {
-		return nil, err
+	refer = compose(refer, rule.Voucher)
+	var prepared []*voucher.Voucher
+	if len(rule.Specs) > 0 && deep < 10 {
+		for _, spec := range rule.Specs {
+			if match(book, spec, sourcedocument, data) {
+				vouchers, err := prepare(book, spec, sourcedocument, refer, data, deep+1)
+				if err != nil {
+					return nil, err
+				}
+				prepared = append(prepared, vouchers...)
+			}
+		}
 	}
-	data.Date = date
-
-	amount, err := findAmount(sourcedocument, rule.Prepare.Amount)
-	if err != nil {
-		return nil, err
+	if len(prepared) > 0 {
+		return prepared, nil
 	}
-	data.Amount = amount
 
-	id, err := generateId(date)
-	if err != nil {
-		return nil, err
+	if data.Date == "" {
+		return nil, fmt.Errorf("no date")
 	}
-	data.Id = id
+	if data.Amount == nil {
+		return nil, fmt.Errorf("no amount")
+	}
+	if data.From == nil {
+		data.From = &account.Account{}
+	}
+	if data.To == nil {
+		data.To = &account.Account{}
+	}
 
-	b, err := json.Marshal(rule.Voucher)
+	b, err := json.Marshal(refer)
 	if err != nil {
 		return nil, err
 	}
@@ -114,19 +192,28 @@ func prepare(book *book.Book, rule *rule.Rule, sourcedocument *sourcedocument.So
 	if err := json.Unmarshal(buf.Bytes(), voucher); err != nil {
 		return nil, err
 	}
-	return voucher, nil
+	prepared = append(prepared, voucher)
+	return prepared, nil
 }
 
 func findAccount(book *book.Book, sourcedocument *sourcedocument.SourceDocument, label string) (*account.Account, error) {
 	label = strings.TrimSpace(label)
-	if label == "" || label == "-" {
+	if label == "" {
 		return nil, nil
 	}
-	annotation := findAnnotation(sourcedocument, label)
-	if annotation == nil {
-		return nil, fmt.Errorf("account not found in %q", label)
+	if label, ok := strings.CutPrefix(label, "#"); ok {
+		label = strings.TrimSpace(label)
+		if label == "" {
+			return nil, nil
+		}
+		annotation := findAnnotation(sourcedocument, label)
+		if annotation == nil {
+			return nil, fmt.Errorf("account not found in %q", label)
+		}
+		return formatAccount(book, annotation.Text), nil
+	} else {
+		return getAccount(book, label), nil
 	}
-	return formatAccount(book, annotation.Text), nil
 }
 
 func formatAccount(book *book.Book, title string) *account.Account {
@@ -156,32 +243,53 @@ func matchAccountLabel(title string, label *account.Label) bool {
 	return true
 }
 
+func getAccount(book *book.Book, title string) *account.Account {
+	for _, acc := range book.Accounts {
+		if acc == nil {
+			continue
+		}
+		if acc.Title == title {
+			return acc
+		}
+	}
+	return nil
+}
+
 func findDate(sourcedocument *sourcedocument.SourceDocument, label string) (string, error) {
 	label = strings.TrimSpace(label)
-	if label != "" {
-		annotation := findAnnotation(sourcedocument, label)
-		if annotation == nil {
-			return "", fmt.Errorf("date not found in %q", label)
-		}
-		return formatDate(annotation.Text)
+	if label == "" {
+		return "", nil
 	}
-	for _, a := range sourcedocument.Annotations {
-		if strings.TrimSpace(a.Label) != "" || strings.TrimSpace(a.Text) == "" {
-			continue
+
+	if label, ok := strings.CutPrefix(label, "#"); ok {
+		label = strings.TrimSpace(label)
+		if label != "" {
+			annotation := findAnnotation(sourcedocument, label)
+			if annotation == nil {
+				return "", fmt.Errorf("date not found in %q", label)
+			}
+			return formatDate(annotation.Text)
 		}
-		if text, ok := matchDate(a.Text); ok {
-			return formatDate(text)
+		for _, a := range sourcedocument.Annotations {
+			if strings.TrimSpace(a.Label) != "" || strings.TrimSpace(a.Text) == "" {
+				continue
+			}
+			if text, ok := matchDate(a.Text); ok {
+				return formatDate(text)
+			}
 		}
+		for _, a := range sourcedocument.Annotations {
+			if strings.TrimSpace(a.Label) == "" || strings.TrimSpace(a.Text) == "" {
+				continue
+			}
+			if text, ok := matchDate(a.Text); ok {
+				return formatDate(text)
+			}
+		}
+		return "", fmt.Errorf("date not found")
+	} else {
+		return formatDate(label)
 	}
-	for _, a := range sourcedocument.Annotations {
-		if strings.TrimSpace(a.Label) == "" || strings.TrimSpace(a.Text) == "" {
-			continue
-		}
-		if text, ok := matchDate(a.Text); ok {
-			return formatDate(text)
-		}
-	}
-	return "", fmt.Errorf("date not found")
 }
 
 func matchDate(text string) (string, bool) {
@@ -223,30 +331,39 @@ func formatDate(text string) (string, error) {
 
 func findAmount(sourcedocument *sourcedocument.SourceDocument, label string) (*amount.Amount, error) {
 	label = strings.TrimSpace(label)
-	if label != "" {
-		annotation := findAnnotation(sourcedocument, label)
-		if annotation == nil {
-			return nil, fmt.Errorf("amount not found in %q", label)
-		}
-		return formatAmount(annotation.Text)
+	if label == "" {
+		return nil, nil
 	}
-	for _, a := range sourcedocument.Annotations {
-		if strings.TrimSpace(a.Label) != "" || strings.TrimSpace(a.Text) == "" {
-			continue
+
+	if label, ok := strings.CutPrefix(label, "#"); ok {
+		label = strings.TrimSpace(label)
+		if label != "" {
+			annotation := findAnnotation(sourcedocument, label)
+			if annotation == nil {
+				return nil, fmt.Errorf("amount not found in %q", label)
+			}
+			return formatAmount(annotation.Text)
 		}
-		if text, ok := matchAmount(a.Text); ok {
-			return formatAmount(text)
+		for _, a := range sourcedocument.Annotations {
+			if strings.TrimSpace(a.Label) != "" || strings.TrimSpace(a.Text) == "" {
+				continue
+			}
+			if text, ok := matchAmount(a.Text); ok {
+				return formatAmount(text)
+			}
 		}
+		for _, a := range sourcedocument.Annotations {
+			if strings.TrimSpace(a.Label) == "" || strings.TrimSpace(a.Text) == "" {
+				continue
+			}
+			if text, ok := matchAmount(a.Text); ok {
+				return formatAmount(text)
+			}
+		}
+		return nil, fmt.Errorf("amount not found")
+	} else {
+		return formatAmount(label)
 	}
-	for _, a := range sourcedocument.Annotations {
-		if strings.TrimSpace(a.Label) == "" || strings.TrimSpace(a.Text) == "" {
-			continue
-		}
-		if text, ok := matchAmount(a.Text); ok {
-			return formatAmount(text)
-		}
-	}
-	return nil, fmt.Errorf("amount not found")
 }
 
 func matchAmount(text string) (string, bool) {
@@ -296,6 +413,42 @@ func formatAmount(text string) (*amount.Amount, error) {
 	return &amount.Amount{Quantity: fmt.Sprintf("%.2f", value), Currency: "CNY"}, nil
 }
 
+func findOrderNumber(sourcedocument *sourcedocument.SourceDocument, label string) (string, error) {
+	return findText(sourcedocument, label, "order number")
+}
+
+func findMerchant(sourcedocument *sourcedocument.SourceDocument, label string) (string, error) {
+	return findText(sourcedocument, label, "merchant")
+}
+
+func findDescription(sourcedocument *sourcedocument.SourceDocument, label string) (string, error) {
+	return findText(sourcedocument, label, "description")
+}
+
+func findCatalog(sourcedocument *sourcedocument.SourceDocument, label string) (string, error) {
+	return findText(sourcedocument, label, "catalog")
+}
+
+func findText(sourcedocument *sourcedocument.SourceDocument, label string, name string) (string, error) {
+	label = strings.TrimSpace(label)
+	if label == "" {
+		return "", nil
+	}
+	if label, ok := strings.CutPrefix(label, "#"); ok {
+		label = strings.TrimSpace(label)
+		if label == "" {
+			return "", nil
+		}
+		annotation := findAnnotation(sourcedocument, label)
+		if annotation == nil {
+			return "", fmt.Errorf("%s not found in %q", name, label)
+		}
+		return strings.TrimSpace(annotation.Text), nil
+	} else {
+		return label, nil
+	}
+}
+
 func findAnnotation(sourcedocument *sourcedocument.SourceDocument, label string) *sourcedocument.Annotation {
 	for _, a := range sourcedocument.Annotations {
 		if strings.Contains(a.Label, label) {
@@ -311,4 +464,43 @@ func generateId(date string) (string, error) {
 		return "", err
 	}
 	return t.Format("20060102150405"), nil
+}
+
+type data struct {
+	Id          string
+	Catalog     string
+	From        *account.Account
+	To          *account.Account
+	Date        string
+	Amount      *amount.Amount
+	OrderNumber string
+	Merchant    string
+	Description string
+}
+
+func compose(refer *voucher.Voucher, v *voucher.Voucher) *voucher.Voucher {
+	if refer == nil {
+		return v
+	}
+	if v == nil {
+		return refer
+	}
+	cv := &voucher.Voucher{}
+	*cv = *refer
+	if v.Id != "" {
+		cv.Id = v.Id
+	}
+	if v.Date != "" {
+		cv.Date = v.Date
+	}
+	if v.Catalog != "" {
+		cv.Catalog = v.Catalog
+	}
+	if len(v.Entries) > 0 {
+		cv.Entries = v.Entries
+	}
+	if v.Description != "" {
+		cv.Description = v.Description
+	}
+	return cv
 }

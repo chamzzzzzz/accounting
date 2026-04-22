@@ -24,4 +24,5 @@ type SourceDocument struct {
 	Merchant    string        `json:"merchant,omitempty"`
 	Description string        `json:"description,omitempty"`
 	Date        string        `json:"date,omitempty"`
+	Catalog     string        `json:"catalog,omitempty"`
 }
