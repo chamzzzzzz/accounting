@@ -387,7 +387,7 @@ func matchAmount(text string) (string, bool) {
 	if text == "" {
 		return "", false
 	}
-	re := regexp.MustCompile(`[¥￥]?\s*[-+]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?`)
+	re := regexp.MustCompile(`[-+]?\s*[¥￥]?\s*[-+]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?`)
 	indexes := re.FindAllStringIndex(text, -1)
 	for _, idx := range indexes {
 		m := strings.TrimSpace(text[idx[0]:idx[1]])
@@ -416,8 +416,8 @@ func formatAmount(text string) (*amount.Amount, error) {
 		return nil, fmt.Errorf("amount format not supported %q", text)
 	}
 	clean := strings.ReplaceAll(text, " ", "")
-	clean = strings.TrimPrefix(clean, "¥")
-	clean = strings.TrimPrefix(clean, "￥")
+	clean = strings.ReplaceAll(clean, "¥", "")
+	clean = strings.ReplaceAll(clean, "￥", "")
 	clean = strings.ReplaceAll(clean, ",", "")
 	value, err := strconv.ParseFloat(clean, 64)
 	if err != nil {
