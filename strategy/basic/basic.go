@@ -316,6 +316,7 @@ func matchDate(text string) (string, bool) {
 	patterns := []string{
 		`(\d{4}年\d{1,2}月\d{1,2}日).*?(\d{1,2}:\d{1,2}:\d{1,2})`,
 		`(\d{4}-\d{1,2}-\d{1,2}).*?(\d{1,2}:\d{1,2}:\d{1,2})`,
+		`(\d{4}/\d{1,2}/\d{1,2}).*?(\d{1,2}:\d{1,2}:\d{1,2})`,
 	}
 	for _, pattern := range patterns {
 		re := regexp.MustCompile(pattern)
@@ -335,6 +336,8 @@ func formatDate(text string) (string, error) {
 		"2006年01月02日15:04:05",
 		"2006-1-2 15:04:05",
 		"2006-01-02 15:04:05",
+		"2006/1/2 15:04:05",
+		"2006/01/02 15:04:05",
 	}
 	for _, layout := range layouts {
 		t, err := time.ParseInLocation(layout, text, time.Local)
