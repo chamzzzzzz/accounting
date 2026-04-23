@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"text/template"
@@ -35,14 +36,19 @@ type Strategy struct {
 
 func (s *Strategy) PrepareVoucher(ctx context.Context, book *book.Book, sourcedocument *sourcedocument.SourceDocument) ([]*voucher.Voucher, error) {
 	var prepared []*voucher.Voucher
-	for _, rule := range book.Rules {
+	for _, rule := range sort(book.Rules) {
 		var data data
 		if match(book, rule, sourcedocument, data) {
 			vouchers, err := prepare(book, rule, sourcedocument, refer, data, 0)
 			if err != nil {
 				return nil, err
 			}
-			prepared = append(prepared, vouchers...)
+			if len(vouchers) > 0 {
+				prepared = append(prepared, vouchers...)
+				if !rule.Continue {
+					break
+				}
+			}
 		}
 	}
 	return prepared, nil
@@ -149,13 +155,18 @@ func prepare(book *book.Book, rule *rule.Rule, sourcedocument *sourcedocument.So
 	refer = compose(refer, rule.Voucher)
 	var prepared []*voucher.Voucher
 	if len(rule.Specs) > 0 && deep < 10 {
-		for _, spec := range rule.Specs {
+		for _, spec := range sort(rule.Specs) {
 			if match(book, spec, sourcedocument, data) {
 				vouchers, err := prepare(book, spec, sourcedocument, refer, data, deep+1)
 				if err != nil {
 					return nil, err
 				}
-				prepared = append(prepared, vouchers...)
+				if len(vouchers) > 0 {
+					prepared = append(prepared, vouchers...)
+					if !spec.Continue {
+						break
+					}
+				}
 			}
 		}
 	}
@@ -503,4 +514,19 @@ func compose(refer *voucher.Voucher, v *voucher.Voucher) *voucher.Voucher {
 		cv.Description = v.Description
 	}
 	return cv
+}
+
+func sort(rules []*rule.Rule) []*rule.Rule {
+	rs := make([]*rule.Rule, len(rules))
+	copy(rs, rules)
+	slices.SortStableFunc(rs, func(a, b *rule.Rule) int {
+		if a.Priority > b.Priority {
+			return 1
+		} else if a.Priority < b.Priority {
+			return -1
+		} else {
+			return 0
+		}
+	})
+	return rs
 }
