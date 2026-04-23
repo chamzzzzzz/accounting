@@ -55,6 +55,8 @@ type option struct {
 	scanner     string
 	labels      []string
 	strategy    string
+	orderNumber string
+	merchant    string
 }
 
 type CLI struct {
@@ -446,6 +448,18 @@ func (c *CLI) parseFlags() {
 				i++
 			}
 			continue
+		case "--order-number":
+			if i+1 < len(c.args) && c.args[i+1][0] != '-' {
+				c.orderNumber = c.args[i+1]
+				i++
+			}
+			continue
+		case "--merchant":
+			if i+1 < len(c.args) && c.args[i+1][0] != '-' {
+				c.merchant = c.args[i+1]
+				i++
+			}
+			continue
 		case "--entry", "-e":
 			if i+1 < len(c.args) && c.args[i+1][0] != '-' {
 				c.entries = append(c.entries, c.args[i+1])
@@ -566,6 +580,8 @@ Options:
   --date, -d         Date (RFC3339, required)
   --catalog, -c      Catalog (required)
   --description      Description
+  --order-number     Order number
+  --merchant         Merchant
   --entry, -e        Entry: "account amount currency" (repeatable)
   --from             Source document or voucher file path
   --to               Voucher output directory
@@ -804,6 +820,8 @@ func (c *CLI) cmdVoucherAdd() error {
 			Catalog:     c.catalog,
 			Entries:     entries,
 			Description: c.description,
+			OrderNumber: c.orderNumber,
+			Merchant:    c.merchant,
 		})
 	}
 

@@ -28,6 +28,8 @@ var refer = &voucher.Voucher{
 		{Account: "{{.From.Title}}", Amount: &amount.Amount{Quantity: "-{{.Amount.Quantity}}", Currency: "{{.Amount.Currency}}"}},
 		{Account: "{{.To.Title}}", Amount: &amount.Amount{Quantity: "{{.Amount.Quantity}}", Currency: "{{.Amount.Currency}}"}},
 	},
+	OrderNumber: "{{.OrderNumber}}",
+	Merchant:    "{{.Merchant}}",
 	Description: "{{.Description}}",
 }
 

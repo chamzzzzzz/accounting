@@ -489,6 +489,14 @@ func readJournalFile(path string) (*Journal, error) {
 				current.Id = strings.TrimSpace(after)
 				continue
 			}
+			if after, ok := strings.CutPrefix(comment, "order_number:"); ok {
+				current.OrderNumber = strings.TrimSpace(after)
+				continue
+			}
+			if after, ok := strings.CutPrefix(comment, "merchant:"); ok {
+				current.Merchant = strings.TrimSpace(after)
+				continue
+			}
 			if current.Comment != "" {
 				current.Comment += "\n"
 			}
@@ -601,6 +609,12 @@ func writeJournalFile(path string, journal *Journal) error {
 		}
 		if !t.IsZero() && (t.Hour() != 0 || t.Minute() != 0 || t.Second() != 0) {
 			fmt.Fprintf(&sb, "  ;date:%s\n", voucher.Date)
+		}
+		if voucher.Merchant != "" {
+			fmt.Fprintf(&sb, "  ;merchant:%s\n", voucher.Merchant)
+		}
+		if voucher.OrderNumber != "" {
+			fmt.Fprintf(&sb, "  ;order_number:%s\n", voucher.OrderNumber)
 		}
 		for _, c := range strings.Split(voucher.Comment, "\n") {
 			if c != "" {

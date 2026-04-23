@@ -15,6 +15,8 @@ type Voucher struct {
 	Date        string   `json:"date,omitempty"`
 	Catalog     string   `json:"catalog,omitempty"`
 	Entries     []*Entry `json:"entries,omitempty"`
+	OrderNumber string   `json:"order_number,omitempty"`
+	Merchant    string   `json:"merchant,omitempty"`
 	Description string   `json:"description,omitempty"`
 	Comment     string   `json:"comment,omitempty"`
 }
