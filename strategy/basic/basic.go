@@ -281,7 +281,10 @@ func findDate(sourcedocument *sourcedocument.SourceDocument, label string) (stri
 			if annotation == nil {
 				return "", fmt.Errorf("date not found in %q", label)
 			}
-			return formatDate(annotation.Text)
+			if text, ok := matchDate(annotation.Text); ok {
+				return formatDate(text)
+			}
+			return "", fmt.Errorf("date %q not match found in %q ", annotation.Text, label)
 		}
 		for _, a := range sourcedocument.Annotations {
 			if strings.TrimSpace(a.Label) != "" || strings.TrimSpace(a.Text) == "" {
@@ -311,13 +314,13 @@ func matchDate(text string) (string, bool) {
 		return "", false
 	}
 	patterns := []string{
-		`\d{4}年\d{1,2}月\d{1,2}日\s*\d{1,2}:\d{1,2}:\d{1,2}`,
-		`\d{4}-\d{1,2}-\d{1,2}\s+\d{1,2}:\d{1,2}:\d{1,2}`,
+		`(\d{4}年\d{1,2}月\d{1,2}日).*?(\d{1,2}:\d{1,2}:\d{1,2})`,
+		`(\d{4}-\d{1,2}-\d{1,2}).*?(\d{1,2}:\d{1,2}:\d{1,2})`,
 	}
 	for _, pattern := range patterns {
 		re := regexp.MustCompile(pattern)
-		if m := re.FindString(text); m != "" {
-			return m, true
+		if m := re.FindStringSubmatch(text); len(m) == 3 {
+			return m[1] + " " + m[2], true
 		}
 	}
 	return "", false
