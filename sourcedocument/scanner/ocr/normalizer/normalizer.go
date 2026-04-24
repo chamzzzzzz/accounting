@@ -611,8 +611,22 @@ func clamp01(v float64) float64 {
 }
 
 func isContinuationLine(current, candidate *unit, limits thresholds, spec *Spec) bool {
+	// A continuation line typically has a very similar X-coordinate to the line above it.
+	// Since limits.alignX is based on medianWidth (which could be wide),
+	// this allows up to e.g. 85px variance, which is too tolerant.
+	// We introduce a stricter left-align bound relative to character height.
+	// Usually characters are square-ish, so a character width is roughly current.location.H
+	// Strict alignment tolerance: e.g. 1.2 x max(heights)
+	strictAlignX := int(float64(maxInt(current.location.H, candidate.location.H)) * 1.5)
+
+	// We use the stricter of limits.alignX and strictAlignX
+	effectiveAlignX := strictAlignX
+	if limits.alignX < strictAlignX {
+		effectiveAlignX = limits.alignX
+	}
+
 	xDiff := abs(current.location.X - candidate.location.X)
-	if xDiff > limits.alignX {
+	if xDiff > effectiveAlignX {
 		return false
 	}
 
