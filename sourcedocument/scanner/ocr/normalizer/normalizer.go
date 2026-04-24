@@ -395,14 +395,17 @@ func countRunes(s string) int {
 func horizontalScore(key, value *unit, sameLineYThreshold, rightDistanceThreshold int) (float64, bool) {
 	kcy := key.location.Y + key.location.H/2
 	vcy := value.location.Y + value.location.H/2
-	if abs(kcy-vcy) > sameLineYThreshold {
+	yDiff := abs(kcy - vcy)
+	if yDiff > sameLineYThreshold {
 		return 0, false
 	}
 	dx := value.location.X - (key.location.X + key.location.W)
 	if dx < 0 || dx > rightDistanceThreshold {
 		return 0, false
 	}
-	return 1.0 - clamp01(float64(dx)/float64(maxInt(rightDistanceThreshold, 1))), true
+	xScore := 1.0 - clamp01(float64(dx)/float64(maxInt(rightDistanceThreshold, 1)))
+	yScore := 1.0 - clamp01(float64(yDiff)/float64(maxInt(sameLineYThreshold, 1)))
+	return xScore*0.5 + yScore*0.5, true
 }
 
 func belowScore(key, value *unit, belowDistanceThreshold, alignXTolerance int) (float64, bool) {
