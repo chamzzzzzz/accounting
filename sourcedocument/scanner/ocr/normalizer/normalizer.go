@@ -37,9 +37,10 @@ type pairCandidate struct {
 }
 
 type resultEntry struct {
-	ann *sourcedocument.Annotation
-	x   int
-	y   int
+	ann     *sourcedocument.Annotation
+	x       int
+	y       int
+	valueVu *unit
 }
 
 const (
@@ -98,9 +99,10 @@ func (n *Normalizer) Normalize(_ context.Context, source *sourcedocument.SourceD
 		}
 		consumed[idx] = true
 		entries = append(entries, &resultEntry{
-			ann: &sourcedocument.Annotation{Label: normalizeKey(key), Text: strings.TrimSpace(value)},
-			x:   u.location.X,
-			y:   u.location.Y,
+			ann:     &sourcedocument.Annotation{Label: normalizeKey(key), Text: strings.TrimSpace(value)},
+			x:       u.location.X,
+			y:       u.location.Y,
+			valueVu: u,
 		})
 	}
 
@@ -169,10 +171,38 @@ func (n *Normalizer) Normalize(_ context.Context, source *sourcedocument.SourceD
 		ku := located[pair.keyIdx]
 		vu := located[pair.valueIdx]
 		entries = append(entries, &resultEntry{
-			ann: &sourcedocument.Annotation{Label: normalizeKey(ku.text), Text: strings.TrimSpace(vu.text)},
-			x:   ku.location.X,
-			y:   ku.location.Y,
+			ann:     &sourcedocument.Annotation{Label: normalizeKey(ku.text), Text: strings.TrimSpace(vu.text)},
+			x:       ku.location.X,
+			y:       ku.location.Y,
+			valueVu: vu,
 		})
+	}
+
+	for _, e := range entries {
+		if e.valueVu == nil {
+			continue
+		}
+		currentVu := e.valueVu
+		for {
+			var nextIdx = -1
+			for i, u := range located {
+				if consumed[i] || u.index <= currentVu.index {
+					continue
+				}
+				if isContinuationLine(currentVu, u, limits, spec) {
+					if nextIdx == -1 || u.index < located[nextIdx].index {
+						nextIdx = i
+					}
+				}
+			}
+			if nextIdx == -1 {
+				break
+			}
+			nextVu := located[nextIdx]
+			e.ann.Text += strings.TrimSpace(nextVu.text)
+			consumed[nextIdx] = true
+			currentVu = nextVu
+		}
 	}
 
 	for idx, u := range located {
@@ -570,4 +600,45 @@ func clamp01(v float64) float64 {
 		return 1
 	}
 	return v
+}
+
+func isContinuationLine(current, candidate *unit, limits thresholds, spec *Spec) bool {
+	xDiff := abs(current.location.X - candidate.location.X)
+	if xDiff > limits.alignX {
+		return false
+	}
+
+	cy1 := current.location.Y + current.location.H/2
+	cy2 := candidate.location.Y + candidate.location.H/2
+	dy := abs(cy1 - cy2)
+
+	if dy <= limits.sameLineY {
+		return false
+	}
+
+	if dy > limits.belowDist {
+		return false
+	}
+
+	if isKeyCandidate(spec, candidate.text) {
+		// Verify if it is a strong key match (e.g. contains colon, explicit keyword or suffix)
+		// and avoid merging only in those definitive cases, as generic key detection might just
+		// be triggered by Chinese characters.
+		norm := normalizeKey(candidate.text)
+		if strings.HasSuffix(strings.TrimSpace(candidate.text), ":") || strings.HasSuffix(strings.TrimSpace(candidate.text), "：") {
+			return false
+		}
+		for _, kw := range spec.KeyWords {
+			if norm == kw {
+				return false
+			}
+		}
+		for _, suffix := range spec.KeySuffixes {
+			if strings.HasSuffix(norm, suffix) {
+				return false
+			}
+		}
+	}
+
+	return true
 }
