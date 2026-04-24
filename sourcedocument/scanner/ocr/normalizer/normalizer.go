@@ -263,7 +263,7 @@ func splitAnnotations(annotations []*sourcedocument.Annotation) ([]*unit, []*sou
 func sortUnitsByPosition(units []*unit) {
 	sort.SliceStable(units, func(i, j int) bool {
 		if units[i].location.Y != units[j].location.Y {
-			return units[i].location.Y < units[j].location.Y
+			return units[i].location.Y > units[j].location.Y
 		}
 		return units[i].location.X < units[j].location.X
 	})
@@ -272,7 +272,7 @@ func sortUnitsByPosition(units []*unit) {
 func sortEntriesByPosition(entries []*resultEntry) {
 	sort.SliceStable(entries, func(i, j int) bool {
 		if entries[i].y != entries[j].y {
-			return entries[i].y < entries[j].y
+			return entries[i].y > entries[j].y
 		}
 		return entries[i].x < entries[j].x
 	})
@@ -439,14 +439,22 @@ func horizontalScore(key, value *unit, sameLineYThreshold, rightDistanceThreshol
 }
 
 func belowScore(key, value *unit, belowDistanceThreshold, alignXTolerance int) (float64, bool) {
-	dy := value.location.Y - (key.location.Y + key.location.H)
-	if dy < 0 || dy > belowDistanceThreshold {
+	// Y axis points upwards (larger Y means physically higher in the image).
+	// Therefore, "value is below key" means value's Y is SMALLER than key's Y.
+	kcy := key.location.Y + key.location.H/2
+	vcy := value.location.Y + value.location.H/2
+	dy := kcy - vcy
+
+	// Roughly estimate gap. If centers are farther than height, there is a gap.
+	gap := dy - (key.location.H+value.location.H)/2
+
+	if dy < 0 || gap > belowDistanceThreshold {
 		return 0, false
 	}
 	if abs(key.location.X-value.location.X) > alignXTolerance {
 		return 0, false
 	}
-	return 1.0 - clamp01(float64(dy)/float64(maxInt(belowDistanceThreshold, 1))), true
+	return 1.0 - clamp01(float64(gap)/float64(maxInt(belowDistanceThreshold, 1))), true
 }
 
 func semanticScore(keyText, valueText string) float64 {
@@ -610,13 +618,13 @@ func isContinuationLine(current, candidate *unit, limits thresholds, spec *Spec)
 
 	cy1 := current.location.Y + current.location.H/2
 	cy2 := candidate.location.Y + candidate.location.H/2
-	dy := abs(cy1 - cy2)
+	dy := cy1 - cy2 // candidate must be below current (Y goes up, so cy1 > cy2)
 
-	if dy <= limits.sameLineY {
+	if dy <= limits.sameLineY { // Not below enough, or even above
 		return false
 	}
 
-	if dy > limits.belowDist {
+	if dy > limits.belowDist { // Too far below
 		return false
 	}
 
