@@ -62,7 +62,7 @@ func DefaultSpec() *Spec {
 		SameLineYFactor:   0.6,
 		RightDistanceMult: 8.0,
 		BelowDistanceMult: 2.5,
-		AlignXTolerance:   2.0,
+		AlignXTolerance:   0.5,
 		PairAcceptScore:   0.55,
 		KeyWords:          []string{},
 		KeySuffixes:       []string{},
@@ -446,13 +446,19 @@ func patternScore(keyText, valueText string) float64 {
 		if looksLikeDateOrDateTime(valueText) {
 			return 1
 		}
-		return 0
+		if countRunes(strings.TrimSpace(valueText)) >= 2 {
+			return 0.7
+		}
+		return 0.4
 	}
 	if isAmountKey(keyText) {
 		if hasDigit(valueText) {
 			return 1
 		}
-		return 0
+		if countRunes(strings.TrimSpace(valueText)) >= 2 {
+			return 0.7
+		}
+		return 0.4
 	}
 	if !isDateTimeKey(keyText) && !isAmountKey(keyText) && countRunes(strings.TrimSpace(valueText)) >= 2 {
 		return 0.8
