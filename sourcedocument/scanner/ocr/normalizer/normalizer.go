@@ -422,19 +422,48 @@ func countRunes(s string) int {
 	return n
 }
 
+func minInt(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
 func horizontalScore(key, value *unit, sameLineYThreshold, rightDistanceThreshold int) (float64, bool) {
 	kcy := key.location.Y + key.location.H/2
 	vcy := value.location.Y + value.location.H/2
 	yDiff := abs(kcy - vcy)
-	if yDiff > sameLineYThreshold {
+
+	passesY := yDiff <= sameLineYThreshold
+	if !passesY {
+		// Check for vertical overlap (in case the key is centered between multi-line values)
+		overlapTop := maxInt(key.location.Y, value.location.Y)
+		overlapBottom := minInt(key.location.Y+key.location.H, value.location.Y+value.location.H)
+		overlapH := overlapBottom - overlapTop
+		if overlapH > 0 {
+			minH := minInt(key.location.H, value.location.H)
+			if float64(overlapH)/float64(minH) > 0.3 {
+				passesY = true
+			}
+		}
+	}
+
+	if !passesY {
 		return 0, false
 	}
+
 	dx := value.location.X - (key.location.X + key.location.W)
 	if dx < 0 || dx > rightDistanceThreshold {
 		return 0, false
 	}
+
 	xScore := 1.0 - clamp01(float64(dx)/float64(maxInt(rightDistanceThreshold, 1)))
 	yScore := 1.0 - clamp01(float64(yDiff)/float64(maxInt(sameLineYThreshold, 1)))
+	if yScore < 0.5 && passesY {
+		// If it passed due to overlap but yDiff was technically large, give it a baseline yScore
+		yScore = 0.5
+	}
+
 	return xScore*0.5 + yScore*0.5, true
 }
 
@@ -616,17 +645,19 @@ func isContinuationLine(current, candidate *unit, limits thresholds, spec *Spec)
 	// this allows up to e.g. 85px variance, which is too tolerant.
 	// We introduce a stricter left-align bound relative to character height.
 	// Usually characters are square-ish, so a character width is roughly current.location.H
-	// Strict alignment tolerance: e.g. 1.2 x max(heights)
-	strictAlignX := int(float64(maxInt(current.location.H, candidate.location.H)) * 1.5)
+	// Strict alignment tolerance: e.g. 1.0 x max(heights) which is about one character width.
+	strictAlignTolerance := int(float64(maxInt(current.location.H, candidate.location.H)) * 1.0)
 
-	// We use the stricter of limits.alignX and strictAlignX
-	effectiveAlignX := strictAlignX
-	if limits.alignX < strictAlignX {
+	// We use the stricter of limits.alignX and strictAlignTolerance
+	effectiveAlignX := strictAlignTolerance
+	if limits.alignX < strictAlignTolerance {
 		effectiveAlignX = limits.alignX
 	}
 
-	xDiff := abs(current.location.X - candidate.location.X)
-	if xDiff > effectiveAlignX {
+	xDiffLeft := abs(current.location.X - candidate.location.X)
+	xDiffRight := abs((current.location.X + current.location.W) - (candidate.location.X + candidate.location.W))
+
+	if xDiffLeft > effectiveAlignX && xDiffRight > effectiveAlignX {
 		return false
 	}
 
