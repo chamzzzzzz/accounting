@@ -53,6 +53,7 @@ type option struct {
 	entries     []string
 	spec        string
 	scanner     string
+	normalize   bool
 	labels      []string
 	strategy    string
 	orderNumber string
@@ -68,10 +69,11 @@ type CLI struct {
 func main() {
 	cli := &CLI{
 		option: option{
-			args:     os.Args[1:],
-			dir:      ".",
-			format:   "ssfs",
-			strategy: "basic",
+			args:      os.Args[1:],
+			dir:       ".",
+			format:    "ssfs",
+			strategy:  "basic",
+			normalize: true,
 		},
 	}
 	if err := cli.Run(); err != nil {
@@ -272,7 +274,11 @@ func (c *CLI) createScanner() (scanner.Scanner, error) {
 		if err != nil {
 			return nil, err
 		}
-		return &ocr.Scanner{Recognizer: r, Normalizer: &normalizer.Normalizer{}}, nil
+		var n *normalizer.Normalizer
+		if c.normalize {
+			n = &normalizer.Normalizer{}
+		}
+		return &ocr.Scanner{Recognizer: r, Normalizer: n}, nil
 	case "openai":
 		var spec ai.Spec
 		if c.spec != "" {
@@ -478,6 +484,12 @@ func (c *CLI) parseFlags() {
 				i++
 			}
 			continue
+		case "--normalize":
+			if i+1 < len(c.args) && c.args[i+1][0] != '-' {
+				c.normalize, _ = strconv.ParseBool(c.args[i+1])
+				i++
+			}
+			continue
 		case "--strategy":
 			if i+1 < len(c.args) && c.args[i+1][0] != '-' {
 				c.option.strategy = c.args[i+1]
@@ -627,7 +639,8 @@ Options:
   --from      Path to the document or directory (required)
   --to        Path to the source document output directory (optional)
   --spec      Path to the scanner spec file (optional)
-  --scanner   Scanner type (openai, ocr, default: ocr)`)
+  --scanner   Scanner type (openai, ocr, default: ocr)
+  --normalize Normalize the scanned source document (true, false, default: true)`)
 }
 
 func (c *CLI) cmdBookCreate() error {
