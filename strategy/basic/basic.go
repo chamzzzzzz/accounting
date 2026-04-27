@@ -56,7 +56,10 @@ func (s *Strategy) PrepareVoucher(ctx context.Context, book *book.Book, sourcedo
 	return prepared, nil
 }
 
-func match(_ *book.Book, rule *rule.Rule, sourcedocument *sourcedocument.SourceDocument, _ data) bool {
+func match(_ *book.Book, rule *rule.Rule, sourcedocument *sourcedocument.SourceDocument, data data) bool {
+	if rule.Match == nil {
+		return true
+	}
 	for _, a := range rule.Match.Annotations {
 		if a.Label == "" && a.Text == "" {
 			continue
@@ -73,6 +76,15 @@ func match(_ *book.Book, rule *rule.Rule, sourcedocument *sourcedocument.SourceD
 			break
 		}
 		if !found {
+			return false
+		}
+	}
+	if rule.Match.Catalog != "" {
+		catalog := data.Catalog
+		if catalog == "" {
+			catalog = sourcedocument.Catalog
+		}
+		if rule.Match.Catalog != catalog {
 			return false
 		}
 	}
@@ -445,25 +457,25 @@ func formatAmount(text string) (*amount.Amount, error) {
 }
 
 func findOrderNumber(sourcedocument *sourcedocument.SourceDocument, label string) (string, error) {
-	return findText(sourcedocument, label, "order number")
+	return findText(sourcedocument, label, "order number", sourcedocument.OrderNumber)
 }
 
 func findMerchant(sourcedocument *sourcedocument.SourceDocument, label string) (string, error) {
-	return findText(sourcedocument, label, "merchant")
+	return findText(sourcedocument, label, "merchant", sourcedocument.Merchant)
 }
 
 func findDescription(sourcedocument *sourcedocument.SourceDocument, label string) (string, error) {
-	return findText(sourcedocument, label, "description")
+	return findText(sourcedocument, label, "description", sourcedocument.Description)
 }
 
 func findCatalog(sourcedocument *sourcedocument.SourceDocument, label string) (string, error) {
-	return findText(sourcedocument, label, "catalog")
+	return findText(sourcedocument, label, "catalog", sourcedocument.Catalog)
 }
 
-func findText(sourcedocument *sourcedocument.SourceDocument, label string, name string) (string, error) {
+func findText(sourcedocument *sourcedocument.SourceDocument, label string, name string, text string) (string, error) {
 	label = strings.TrimSpace(label)
 	if label == "" {
-		return "", nil
+		return text, nil
 	}
 	if label, ok := strings.CutPrefix(label, "#"); ok {
 		label = strings.TrimSpace(label)
