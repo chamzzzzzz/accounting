@@ -217,6 +217,10 @@ func (c *CLI) cmdSourceDocumentScan() error {
 			return err
 		}
 
+		if c.catalog != "" {
+			sd.Catalog = c.catalog
+		}
+
 		if c.to != "" {
 			rel, err := filepath.Rel(c.from, path)
 			if err != nil || rel == "." {
