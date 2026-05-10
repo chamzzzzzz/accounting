@@ -4,13 +4,17 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"math"
+	"net/http"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"reflect"
 	"sort"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 	"unicode"
 
@@ -23,6 +27,7 @@ import (
 	"github.com/chamzzzzzz/accounting/journal"
 	"github.com/chamzzzzzz/accounting/report"
 	"github.com/chamzzzzzz/accounting/rule"
+	"github.com/chamzzzzzz/accounting/service"
 	"github.com/chamzzzzzz/accounting/sourcedocument"
 	"github.com/chamzzzzzz/accounting/sourcedocument/scanner"
 	"github.com/chamzzzzzz/accounting/sourcedocument/scanner/ai"
@@ -39,6 +44,7 @@ import (
 type option struct {
 	args        []string
 	dir         string
+	book        string
 	to          string
 	from        string
 	format      string
@@ -58,6 +64,8 @@ type option struct {
 	strategy    string
 	orderNumber string
 	merchant    string
+	addr        string
+	pathPrefix  string
 }
 
 type CLI struct {
@@ -71,9 +79,11 @@ func main() {
 		option: option{
 			args:      os.Args[1:],
 			dir:       ".",
+			book:      ".",
 			format:    "ssfs",
 			strategy:  "basic",
 			normalize: true,
+			addr:      ":8080",
 		},
 	}
 	if err := cli.Run(); err != nil {
@@ -110,7 +120,7 @@ func (c *CLI) Run() error {
 	if c.subcmd == "-h" || c.subcmd == "--help" {
 		c.subcmd = "help"
 	}
-	if c.subcmd == "" || c.subcmd == "help" {
+	if c.subcmd == "help" || (c.subcmd == "" && c.cmd != "service") {
 		switch c.cmd {
 		case "book":
 			c.printBookHelp()
@@ -132,6 +142,9 @@ func (c *CLI) Run() error {
 			return nil
 		case "sourcedocument":
 			c.printSourceDocumentHelp()
+			return nil
+		case "service":
+			c.printServiceHelp()
 			return nil
 		default:
 			c.printHelp()
@@ -171,6 +184,8 @@ func (c *CLI) Run() error {
 		return c.runReport()
 	case "sourcedocument":
 		return c.runSourceDocument()
+	case "service":
+		return c.runService()
 	default:
 		fmt.Fprintf(os.Stderr, "unknown command: %s\n", c.cmd)
 		c.printHelp()
@@ -187,6 +202,68 @@ func (c *CLI) runSourceDocument() error {
 		c.printSourceDocumentHelp()
 		return nil
 	}
+}
+
+func (c *CLI) runService() error {
+	switch c.subcmd {
+	case "", "start":
+		return c.cmdServiceStart()
+	default:
+		c.printServiceHelp()
+		return nil
+	}
+}
+
+func (c *CLI) cmdServiceStart() error {
+	mux := &http.ServeMux{}
+	server := &http.Server{
+		Addr:    c.addr,
+		Handler: mux,
+	}
+
+	scanner, err := c.createScanner()
+	if err != nil {
+		return err
+	}
+
+	option := service.Option{
+		PathPrefix: c.pathPrefix,
+		Dir:        c.dir,
+		Book:       c.book,
+	}
+	s := &service.Service{
+		Option:  option,
+		Scanner: scanner,
+	}
+	if err := s.Init(context.Background()); err != nil {
+		return err
+	}
+	mux.Handle(s.PathPrefix()+"/", s)
+
+	go func() {
+		if err := server.ListenAndServe(); err != nil {
+			if err != http.ErrServerClosed {
+				log.Printf("listen and serve error. err=%s", err)
+			}
+		}
+	}()
+	log.Printf("service started. addr=%s path_prefix=%s", c.addr, s.PathPrefix())
+
+	sigch := make(chan os.Signal, 1)
+	signal.Notify(sigch, syscall.SIGTERM, syscall.SIGINT)
+	<-sigch
+	log.Printf("server shutdown started")
+	if err := s.Shutdown(context.Background()); err != nil {
+		log.Printf("service shutdown error. err=%s", err)
+	}
+	if err := server.Shutdown(context.Background()); err != nil {
+		log.Printf("server shutdown error. err=%s", err)
+	}
+	if err := s.Uninit(context.Background()); err != nil {
+		log.Printf("service uninit error. err=%s", err)
+	}
+	log.Printf("server shutdown finished.")
+	return nil
 }
 
 func (c *CLI) cmdSourceDocumentScan() error {
@@ -377,12 +454,12 @@ func (c *CLI) runReport() error {
 }
 
 func (c *CLI) loadBook() (*book.Book, error) {
-	bk, err := c.provider.Load(context.Background(), ".")
+	bk, err := c.provider.Load(context.Background(), c.book)
 	if err != nil {
 		return nil, err
 	}
 	if bk == nil {
-		return nil, fmt.Errorf("book not found: %s", c.dir)
+		return nil, fmt.Errorf("book not found: %s", filepath.Join(c.dir, c.book))
 	}
 	return bk, nil
 }
@@ -410,9 +487,15 @@ func (c *CLI) parseFlags() {
 	var args []string
 	for i := 0; i < len(c.args); i++ {
 		switch c.args[i] {
-		case "--book", "-b":
+		case "--dir":
 			if i+1 < len(c.args) && c.args[i+1][0] != '-' {
 				c.dir = c.args[i+1]
+				i++
+			}
+			continue
+		case "--book", "-b":
+			if i+1 < len(c.args) && c.args[i+1][0] != '-' {
+				c.book = c.args[i+1]
 				i++
 			}
 			continue
@@ -506,6 +589,18 @@ func (c *CLI) parseFlags() {
 				i++
 			}
 			continue
+		case "--addr":
+			if i+1 < len(c.args) && c.args[i+1][0] != '-' {
+				c.addr = c.args[i+1]
+				i++
+			}
+			continue
+		case "--path-prefix":
+			if i+1 < len(c.args) && c.args[i+1][0] != '-' {
+				c.pathPrefix = c.args[i+1]
+				i++
+			}
+			continue
 		case "--from":
 			if i+1 < len(c.args) && c.args[i+1][0] != '-' {
 				c.from = c.args[i+1]
@@ -538,10 +633,14 @@ Commands:
   rule      Rule management
   report    Report management
   sourcedocument  Source document management
+  service   Service management
 
 Options:
-  --book, -b      Book directory (default: ".")
+  --dir           Book directory (default: ".")
+  --book, -b      Book name (default: ".")
   --format, -f    Book format (ssfs, ledger; default: ssfs)
+  --addr          Service listen address (default: :8080)
+  --path-prefix   Service path prefix (default: /accounting)
 
 Use "accounting <command> help" for more information.`)
 }
@@ -645,6 +744,18 @@ Options:
   --spec      Path to the scanner spec file (optional)
   --scanner   Scanner type (openai, ocr, default: ocr)
   --normalize Normalize the scanned source document (true, false, default: true)`)
+}
+
+func (c *CLI) printServiceHelp() {
+	fmt.Println(`Usage: accounting service [start] [options]
+
+Subcommands:
+	start     Start service
+	help      Show this help
+
+Options:
+	--addr         Listen address (default: :8080)
+	--path-prefix  Service path prefix (default: /accounting)`)
 }
 
 func (c *CLI) cmdBookCreate() error {
