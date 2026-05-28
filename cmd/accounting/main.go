@@ -1013,6 +1013,11 @@ func (c *CLI) cmdVoucherPrepare() error {
 		if err != nil {
 			return err
 		}
+		count := len(vouchers)
+		if count == 0 {
+			fmt.Printf("%s not prepared.\n", path)
+			continue
+		}
 
 		if c.to != "" {
 			multiple := len(vouchers) > 1
